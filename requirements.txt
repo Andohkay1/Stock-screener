@@ -2,3 +2,8 @@ streamlit
 yfinance
 pandas
 numpy
+xlsxwriter
+streamlit
+yfinance
+pandas
+numpy
