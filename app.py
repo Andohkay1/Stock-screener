@@ -5,54 +5,56 @@ import numpy as np
 import io
 
 st.set_page_config(
-    page_title="Akab Stock Screener – Verified Graham Logic",
+    page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
     layout="centered"
 )
 
 st.title("Akab Stock Screener")
-st.markdown("Using 7 fundamental criteria with verified EPS-based Graham Number & Value logic.")
+st.markdown("Uses verified EPS logic for Graham Number and Value.")
 
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        bs = stock.balance_sheet
-        inc = stock.income_stmt
+        bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
+        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
 
-        col = bs.columns[0] if len(bs.columns) > 0 else None
-        if not col:
-            return None
+        col = bs.columns[0] if not bs.empty else None
 
-        # Estimate current assets
-        if "Total Current Assets" in bs.index:
-            est_current_assets = bs.loc["Total Current Assets", col]
-        else:
-            est_current_assets = sum([
+        # Estimate CA and CL
+        est_current_assets = 0
+        est_total_liabilities = 0
+
+        if col:
+            if "Total Current Assets" in bs.index:
+                est_current_assets = bs.loc["Total Current Assets", col]
+            else:
+                est_current_assets = sum([
+                    bs.loc[key, col] if key in bs.index else 0
+                    for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
+                ])
+
+            est_total_liabilities = sum([
                 bs.loc[key, col] if key in bs.index else 0
-                for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
+                for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"]
             ])
 
-        # Estimate current liabilities
-        est_total_liabilities = sum([
-            bs.loc[key, col] if key in bs.index else 0
-            for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"]
-        ])
-
-        # EPS computation from Net Income / Shares Outstanding
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
-        if "Net Income" in inc.index and shares_outstanding:
+        if not inc.empty and "Net Income" in inc.index and shares_outstanding:
             net_incomes = inc.loc["Net Income"].dropna().values
             eps_values = [ni / shares_outstanding for ni in net_incomes if shares_outstanding > 0]
 
         eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
 
+        if not eps_values:
+            eps_values = [info.get("trailingEps", 0)] * 7
+
         eps_7yr_avg = np.mean(eps_values[-7:]) if len(eps_values) >= 3 else np.mean(eps_values)
         eps_5yr_avg = np.mean(eps_values[-5:]) if len(eps_values) >= 3 else np.mean(eps_values)
 
-        # EPS growth
         eps_growth = 0
         if len(eps_values) >= 2:
             valid_eps = [eps for eps in eps_values if eps > 0]
@@ -73,7 +75,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # Apply screening criteria
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -85,7 +86,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         }
 
         passed = sum(criteria.values())
-
         def mark(val): return "✅" if val else "❌"
 
         return {
@@ -103,7 +103,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A"
         }
 
-    except Exception:
+    except Exception as e:
+        st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
 st.subheader("📥 Input Tickers")
