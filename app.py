@@ -11,9 +11,9 @@ st.markdown("_Find value. Avoid noise. Invest wisely._")
 
 # === FETCH AAA YIELD ===
 def fetch_aaa_yield():
-    return 4.4  # Placeholder AAA bond yield
+    return 4.4  # Default yield used for Graham value
 
-# === FINANCIAL FETCH FUNCTION ===
+# === FINANCIAL DATA FETCH FUNCTION ===
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, yield_value):
     try:
@@ -31,22 +31,31 @@ def fetch_financials(ticker, yield_value):
         graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps and bvps and eps > 0 and bvps > 0 else None
         graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps and eps > 0 else None
 
-        # Format with pass/fail marks
+        # Display formatting + valuation logic
         revenue_display = f"{revenue:,} ✅" if revenue > 100_000_000 else f"{revenue:,} ❌"
         current_ratio_display = f"{current_ratio:.2f} ✅" if current_ratio > 2 else f"{current_ratio:.2f} ❌"
         pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio < 1.5 else f"{pb_ratio:.2f} ❌"
-        graham_number_display = f"{graham_number:.2f} ✅" if graham_number else "❌"
-        graham_value_display = f"{graham_value:.2f} ✅" if graham_value else "❌"
         eps_display = f"{eps:.2f}" if eps is not None else "N/A"
         bvps_display = f"{bvps:.2f}" if bvps is not None else "N/A"
-        price_display = f"{price:.2f}" if price else "N/A"
+        price_display = f"{price:.2f}" if price is not None else "N/A"
+
+        # Price must be BELOW intrinsic value to pass
+        if graham_number and price:
+            graham_number_display = f"{graham_number:.2f} ✅" if price < graham_number else f"{graham_number:.2f} ❌"
+        else:
+            graham_number_display = "❌"
+
+        if graham_value and price:
+            graham_value_display = f"{graham_value:.2f} ✅" if price < graham_value else f"{graham_value:.2f} ❌"
+        else:
+            graham_value_display = "❌"
 
         passed_count = sum([
             revenue > 100_000_000,
             current_ratio > 2,
             pb_ratio < 1.5,
-            graham_number is not None,
-            graham_value is not None
+            graham_number is not None and price is not None and price < graham_number,
+            graham_value is not None and price is not None and price < graham_value
         ])
 
         return {
@@ -105,7 +114,7 @@ if st.button("🚀 Run Screening"):
                 st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
                 st.dataframe(df_sorted)
 
-                # Export to Excel
+                # Excel export
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                     df_sorted.to_excel(writer, index=False)
