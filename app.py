@@ -159,8 +159,8 @@ elif manual_input:
     tickers = [t.strip().upper() for t in manual_input.replace(",", " ").split() if t.strip()]
 
 # === Run Screening ===
-if tickers:
-    if st.button("🚀 Run Screening"):
+if st.button("🚀 Run Screening"):
+    if tickers:
         with st.spinner("Running screen..."):
             results = []
             yield_value = fetch_aaa_yield()
@@ -187,5 +187,5 @@ if tickers:
                 )
             else:
                 st.warning("No valid data returned from screen.")
-else:
-    st.info("Enter tickers manually or upload a CSV to begin.")
+    else:
+        st.warning("Please enter or upload at least one ticker before running the screener.")
