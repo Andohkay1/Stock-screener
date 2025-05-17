@@ -29,27 +29,32 @@ def fetch_financials(ticker, yield_value):
         graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps and bvps and eps > 0 and bvps > 0 else None
         graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps and eps > 0 else None
 
-        # Individual pass/fail criteria
-        passes = {
-            "Rev > $100M": revenue > 100_000_000,
-            "Current Ratio > 2": current_ratio > 2,
-            "P/B > 1.5": pb_ratio > 1.5,
-            "Graham # exists": graham_number is not None,
-            "Graham Val exists": graham_value is not None
-        }
+        # Criteria evaluation: Add ✅ if passed, ❌ if failed
+        revenue_display = f"{revenue:,} ✅" if revenue > 100_000_000 else f"{revenue:,} ❌"
+        current_ratio_display = f"{current_ratio:.2f} ✅" if current_ratio > 2 else f"{current_ratio:.2f} ❌"
+        pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio > 1.5 else f"{pb_ratio:.2f} ❌"
+        graham_number_display = f"{graham_number:.2f} ✅" if graham_number else "❌"
+        graham_value_display = f"{graham_value:.2f} ✅" if graham_value else "❌"
+        eps_display = f"{eps:.2f}" if eps is not None else "N/A"
+        bvps_display = f"{bvps:.2f}" if bvps is not None else "N/A"
 
-        passed_count = sum(passes.values())
+        passed_count = sum([
+            revenue > 100_000_000,
+            current_ratio > 2,
+            pb_ratio > 1.5,
+            graham_number is not None,
+            graham_value is not None
+        ])
 
         return {
             "Ticker": ticker,
-            "Revenue": revenue,
-            "Current Ratio": current_ratio,
-            "P/B Ratio": pb_ratio,
-            "EPS": eps,
-            "Book Value": bvps,
-            "Graham Number": graham_number,
-            "Graham Value": graham_value,
-            **passes,
+            "Revenue": revenue_display,
+            "Current Ratio": current_ratio_display,
+            "P/B Ratio": pb_display,
+            "EPS": eps_display,
+            "Book Value": bvps_display,
+            "Graham Number": graham_number_display,
+            "Graham Value": graham_value_display,
             "Passed Count": passed_count
         }
     except Exception as e:
