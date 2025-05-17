@@ -5,13 +5,13 @@ import numpy as np
 import io
 
 st.set_page_config(
-    page_title="Akab Stock Screener – Fundamental Value Screener",
+    page_title="Akab Stock Screener – Graham-Enhanced",
     page_icon="📉",
     layout="centered"
 )
 
 st.title("Akab Stock Screener")
-st.markdown("A value investing screener using 7 fundamental criteria with Graham valuation support.")
+st.markdown("Includes 7 value criteria and Graham Value logic using estimated EPS growth.")
 
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker):
@@ -19,16 +19,36 @@ def fetch_financials(ticker):
         stock = yf.Ticker(ticker)
         info = stock.info
         price = info.get("currentPrice", None)
-
-        # Financials
-        revenue = info.get("totalRevenue", 0)
-        current_ratio = info.get("currentRatio", 0)
+        bvps = info.get("bookValue", 0)
         pb_ratio = info.get("priceToBook", 0)
         dividend = info.get("dividendRate", 0)
-        eps = info.get("trailingEps", 0)
-        bvps = info.get("bookValue", 0)
+        revenue = info.get("totalRevenue", 0)
+        current_ratio = info.get("currentRatio", 0)
+        eps_ttm = info.get("trailingEps", 0)
 
-        # Balance Sheet for estimating CA - CL
+        # EPS history
+        hist = stock.earnings
+        eps_growth = 0
+        eps_5yr = []
+        eps_7yr = []
+
+        if not hist.empty and len(hist) >= 7:
+            eps_series = hist["Earnings"].values[-7:]
+            oldest = eps_series[0]
+            latest = eps_series[-1]
+            eps_growth = (latest - oldest) / oldest if oldest else 0
+            eps_5yr = eps_series[-5:]
+            eps_7yr = eps_series
+        else:
+            eps_5yr = [eps_ttm] * 5
+            eps_7yr = [eps_ttm] * 7
+
+        eps_5yr_avg = np.mean(eps_5yr)
+        eps_7yr_avg = np.mean(eps_7yr)
+        eps_3yr_avg = np.mean([eps_ttm] * 3) if eps_ttm else 0
+        price_pe_pass = price is not None and eps_3yr_avg and price <= 15 * eps_3yr_avg
+
+        # Working capital from balance sheet
         bs = stock.balance_sheet
         est_ca = 0
         est_cl = 0
@@ -49,20 +69,13 @@ def fetch_financials(ticker):
             ])
 
         wc_pass = est_ca > est_cl
+        eps_5yr_pass = sum([1 for e in eps_5yr if e > 0]) >= 4
 
-        # EPS 5 year positive (mocked)
-        eps_history = [eps] * 5
-        eps_5yr_pass = sum([1 for e in eps_history if e and e > 0]) >= 4
+        # Graham formulas
+        bond_yield = 4.4
+        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
+        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / bond_yield) if eps_5yr_avg > 0 else np.nan
 
-        # Price ≤ 15 x 3Y Avg EPS
-        eps_3yr_avg = np.mean([eps] * 3) if eps else None
-        price_pe_pass = price and eps_3yr_avg and price <= 15 * eps_3yr_avg
-
-        # Graham valuations
-        graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps > 0 and bvps > 0 else None
-        graham_value = eps * (8.5 + 2 * 0) * (4.4 / 4.4) if eps > 0 else None
-
-        # 7 Criteria
         passed = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -73,9 +86,8 @@ def fetch_financials(ticker):
             "P/B < 1.5": pb_ratio < 1.5
         }
 
-        passed_count = sum(passed.values())
-
         def mark(val): return "✅" if val else "❌"
+        passed_count = sum(passed.values())
 
         return {
             "Ticker": ticker,
@@ -88,8 +100,8 @@ def fetch_financials(ticker):
             "Price ≤ 15 x 3Y Avg EPS": f"${price:.2f} ≤ ${15 * eps_3yr_avg:.2f} {mark(passed['Price ≤ 15 x 3Y Avg EPS'])}" if price and eps_3yr_avg else f"N/A ❌",
             "P/B < 1.5": f"{pb_ratio:.2f} {mark(passed['P/B < 1.5'])}",
             "Passed Count": passed_count,
-            "Graham Number": f"${graham_number:.2f} {mark(price < graham_number)}" if graham_number and price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(price < graham_value)}" if graham_value and price else "N/A"
+            "Graham Number": f"${graham_number:.2f} {mark(price < graham_number)}" if not np.isnan(graham_number) and price else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(price < graham_value)}" if not np.isnan(graham_value) and price else "N/A"
         }
 
     except Exception:
