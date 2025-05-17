@@ -3,11 +3,17 @@ import pandas as pd
 import yfinance as yf
 import io
 
-# Optional: replace this with your own function to fetch yield
+# === CONFIG ===
+st.set_page_config(page_title="Akab Stock Screener", page_icon="📉")
+st.title("Akab Stock Screener")
+st.markdown("A value-based stock screener using Graham's investment principles.")
+st.markdown("_Find value. Avoid noise. Invest wisely._")
+
+# === YIELD FETCH (placeholder) ===
 def fetch_aaa_yield():
     return 4.4  # Default AAA bond yield
 
-# Example placeholder logic for fetching financials
+# === FINANCIAL DATA FETCH & SCREEN ===
 def fetch_financials(ticker, yield_value):
     try:
         stock = yf.Ticker(ticker)
@@ -19,41 +25,37 @@ def fetch_financials(ticker, yield_value):
         current_ratio = info.get("currentRatio", 0)
         pb_ratio = info.get("priceToBook", 0)
 
-        if not all([eps, bvps]):
-            return None
+        # Graham metrics
+        graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps and bvps and eps > 0 and bvps > 0 else None
+        graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps and eps > 0 else None
 
-        graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps > 0 and bvps > 0 else None
-        graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps > 0 else None
+        # Individual pass/fail criteria
+        passes = {
+            "Rev > $100M": revenue > 100_000_000,
+            "Current Ratio > 2": current_ratio > 2,
+            "P/B > 1.5": pb_ratio > 1.5,
+            "Graham # exists": graham_number is not None,
+            "Graham Val exists": graham_value is not None
+        }
 
-        passed_count = sum([
-            revenue > 100_000_000,
-            current_ratio > 2,
-            pb_ratio > 1.5,
-            graham_number is not None,
-            graham_value is not None
-        ])
+        passed_count = sum(passes.values())
 
         return {
             "Ticker": ticker,
             "Revenue": revenue,
+            "Current Ratio": current_ratio,
             "P/B Ratio": pb_ratio,
             "EPS": eps,
             "Book Value": bvps,
-            "Current Ratio": current_ratio,
             "Graham Number": graham_number,
             "Graham Value": graham_value,
+            **passes,
             "Passed Count": passed_count
         }
     except Exception as e:
         return None
 
-# Page config and title
-st.set_page_config(page_title="Akab Stock Screener", page_icon="📉")
-st.title("Akab Stock Screener")
-st.markdown("A value-based stock screener using Graham's investment principles.")
-st.markdown("_Find value. Avoid noise. Invest wisely._")
-
-# === Input Section ===
+# === INPUT SECTION ===
 st.subheader("📥 Input Tickers")
 
 tickers = []
@@ -64,16 +66,16 @@ if manual_input:
     typed = [t.strip().upper() for t in manual_input.split(",") if t.strip()]
     tickers.extend(typed)
 
-# Upload option
+# Upload option second
 uploaded_file = st.file_uploader("Or upload a CSV file with ticker symbols", type="csv")
 if uploaded_file is not None:
     df_upload = pd.read_csv(uploaded_file)
     uploaded_tickers = df_upload.iloc[:, 0].dropna().tolist()
     tickers.extend(uploaded_tickers)
 
-tickers = list(set([t for t in tickers if t]))  # Deduplicate + clean
+tickers = list(set([t for t in tickers if t]))  # Clean & deduplicate
 
-# === Run Screening ===
+# === RUN SCREENING ===
 if st.button("🚀 Run Screening"):
     if tickers:
         with st.spinner("Running screen..."):
@@ -90,7 +92,7 @@ if st.button("🚀 Run Screening"):
                 st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
                 st.dataframe(df_sorted)
 
-                # Export to Excel
+                # Download to Excel
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                     df_sorted.to_excel(writer, index=False)
