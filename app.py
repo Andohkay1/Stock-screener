@@ -15,29 +15,31 @@ st.title("Akab Stock Screener")
 st.markdown("A value-based screener inspired by Graham’s investing principles.")
 st.markdown("_Find value. Avoid noise. Invest wisely._")
 
-# Section: Upload or Type Tickers
 st.subheader("📥 Input Tickers")
-
-option = st.radio("How would you like to provide tickers?", ("Upload CSV", "Type manually"))
 
 tickers = []
 
-if option == "Upload CSV":
-    uploaded_file = st.file_uploader("Upload a CSV file with ticker symbols", type="csv")
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        tickers = df.iloc[:, 0].dropna().tolist()
+# Upload option
+uploaded_file = st.file_uploader("Upload a CSV file with ticker symbols", type="csv")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    tickers = df.iloc[:, 0].dropna().tolist()
 
-elif option == "Type manually":
-    manual_input = st.text_area("Enter ticker symbols separated by commas (e.g., AAPL,MSFT,GOOG)")
-    tickers = [t.strip().upper() for t in manual_input.split(",") if t.strip()]
+# Manual input option
+manual_input = st.text_area("Or type ticker symbols separated by commas (e.g., AAPL, MSFT, GOOG)")
+if manual_input:
+    typed_tickers = [t.strip().upper() for t in manual_input.split(",") if t.strip()]
+    tickers.extend(typed_tickers)
 
-# Proceed only if tickers are provided
+# Remove duplicates
+tickers = list(set(tickers))
+
+# Proceed if tickers are available
 if tickers:
     st.success(f"{len(tickers)} tickers received. Running screen...")
     # 🔁 Your screening logic goes here
 else:
-    st.info("Please upload a file or enter tickers to begin.")
+    st.info("Please upload a file or type tickers to begin.")
 import streamlit as st
 import pandas as pd
 import yfinance as yf
