@@ -1,4 +1,22 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import yfinance as yf
 
+# Set Streamlit page config (🟢 Add this at the very top)
+st.set_page_config(
+    page_title="Akab Stock Screener",
+    page_icon="📉",
+    layout="centered"
+)
+
+# Title and description
+st.title("Akab Stock Screener")
+st.markdown("A value-based screener inspired by Graham’s investing principles.")
+st.markdown("_Find value. Avoid noise. Invest wisely._")
+
+# Your app logic continues below...
+uploaded_file = st.file_uploader("Upload a list of tickers (CSV format)", type="csv")
 import streamlit as st
 import pandas as pd
 import yfinance as yf
