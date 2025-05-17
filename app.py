@@ -19,27 +19,29 @@ st.subheader("📥 Input Tickers")
 
 tickers = []
 
-# Upload option
-uploaded_file = st.file_uploader("Upload a CSV file with ticker symbols", type="csv")
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    tickers = df.iloc[:, 0].dropna().tolist()
-
-# Manual input option
-manual_input = st.text_area("Or type ticker symbols separated by commas (e.g., AAPL, MSFT, GOOG)")
+# 🔹 Manual Input First
+manual_input = st.text_area("Type ticker symbols separated by commas (e.g., AAPL, MSFT, GOOG)")
 if manual_input:
     typed_tickers = [t.strip().upper() for t in manual_input.split(",") if t.strip()]
     tickers.extend(typed_tickers)
 
-# Remove duplicates
-tickers = list(set(tickers))
+# 🔹 Upload Option Second
+uploaded_file = st.file_uploader("Or upload a CSV file with ticker symbols", type="csv")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    uploaded_tickers = df.iloc[:, 0].dropna().tolist()
+    tickers.extend(uploaded_tickers)
 
-# Proceed if tickers are available
-if tickers:
-    st.success(f"{len(tickers)} tickers received. Running screen...")
-    # 🔁 Your screening logic goes here
-else:
-    st.info("Please upload a file or type tickers to begin.")
+# 🔄 Remove duplicates and empty
+tickers = list(set([t for t in tickers if t]))
+
+# 🔘 Button to trigger screening
+if st.button("Run Screener"):
+    if tickers:
+        st.success(f"{len(tickers)} tickers received. Running screen...")
+        # 🔁 Your screening logic goes here
+    else:
+        st.warning("Please enter or upload at least one ticker.")
 import streamlit as st
 import pandas as pd
 import yfinance as yf
