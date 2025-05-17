@@ -38,31 +38,42 @@ def fetch_financials(ticker):
 
         # Graham calculations
         graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps > 0 and bvps > 0 else None
-        graham_value = eps * (8.5 + 2 * 0) * (4.4 / 4.4) if eps > 0 else None  # Assume AAA yield = 4.4%
+        graham_value = eps * (8.5 + 2 * 0) * (4.4 / 4.4) if eps > 0 else None  # AAA yield 4.4%
 
         # 7 Criteria
-        criteria = {
-            "Revenue > $100M": revenue > 100_000_000,
-            "Current Ratio > 2": current_ratio > 2,
-            "Estimated CA - CL > 0": (current_assets - current_liabilities) > 0,
-            "Pays Dividends": dividend and dividend > 0,
-            "Positive EPS for 5 Years": eps_5yr_pass,
-            "Price ≤ 15 x 3Y Avg EPS": price_eps_pass,
-            "P/B < 1.5": pb_ratio < 1.5
-        }
+        revenue_pass = revenue > 100_000_000
+        current_ratio_pass = current_ratio > 2
+        working_capital_pass = (current_assets - current_liabilities) > 0
+        dividend_pass = dividend and dividend > 0
+        eps_5yr_pass = eps_5yr_pass
+        price_eps_pass = price_eps_pass
+        pb_pass = pb_ratio < 1.5
 
-        passed_count = sum(criteria.values())
+        passed_count = sum([
+            revenue_pass,
+            current_ratio_pass,
+            working_capital_pass,
+            dividend_pass,
+            eps_5yr_pass,
+            price_eps_pass,
+            pb_pass
+        ])
 
-        # Marker formatting
-        def mark(val): return f":green[✅]" if val else f":red[❌]"
+        def mark(val): return "✅" if val else "❌"
 
         return {
             "Ticker": ticker,
             "Price": f"${price:.2f}" if price else "N/A",
-            **{k: mark(v) for k, v in criteria.items()},
+            "Revenue > $100M": f"{revenue:,} {mark(revenue_pass)}",
+            "Current Ratio > 2": f"{current_ratio:.2f} {mark(current_ratio_pass)}",
+            "Estimated CA - CL > 0": f"{(current_assets - current_liabilities):,.0f} {mark(working_capital_pass)}",
+            "Pays Dividends": f"{dividend:.2f} {mark(dividend_pass)}" if dividend else f"0.00 {mark(False)}",
+            "Positive EPS for 5 Years": f"{'Yes' if eps_5yr_pass else 'No'} {mark(eps_5yr_pass)}",
+            "Price ≤ 15 x 3Y Avg EPS": f"${price:.2f} ≤ ${15 * eps_3yr_avg:.2f} {mark(price_eps_pass)}" if price and eps_3yr_avg else f"N/A ❌",
+            "P/B < 1.5": f"{pb_ratio:.2f} {mark(pb_pass)}",
             "Passed Count": passed_count,
-            "Graham Number": f"${graham_number:.2f} :green[✅]" if graham_number and price and price < graham_number else f"${graham_number:.2f} :red[❌]" if graham_number else "❌",
-            "Graham Value": f"${graham_value:.2f} :green[✅]" if graham_value and price and price < graham_value else f"${graham_value:.2f} :red[❌]" if graham_value else "❌"
+            "Graham Number": f"${graham_number:.2f} {mark(price < graham_number)}" if graham_number and price else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(price < graham_value)}" if graham_value and price else "N/A"
         }
     except Exception:
         return None
