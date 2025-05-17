@@ -1,3 +1,20 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+import io
+
+# === PAGE CONFIG ===
+st.set_page_config(page_title="Akab Stock Screener", page_icon="📉")
+st.title("Akab Stock Screener")
+st.markdown("A value-based stock screener using Graham's investment principles.")
+st.markdown("_Find value. Avoid noise. Invest wisely._")
+
+# === FETCH AAA YIELD ===
+def fetch_aaa_yield():
+    return 4.4  # Placeholder
+
+# === CACHED FINANCIAL FETCH FUNCTION ===
+@st.cache_data(ttl=3600)
 def fetch_financials(ticker, yield_value):
     try:
         stock = yf.Ticker(ticker)
@@ -14,7 +31,7 @@ def fetch_financials(ticker, yield_value):
         graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps and bvps and eps > 0 and bvps > 0 else None
         graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps and eps > 0 else None
 
-        # Display formatting + pass/fail marks
+        # Display format + pass/fail marks
         revenue_display = f"{revenue:,} ✅" if revenue > 100_000_000 else f"{revenue:,} ❌"
         current_ratio_display = f"{current_ratio:.2f} ✅" if current_ratio > 2 else f"{current_ratio:.2f} ❌"
         pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio > 1.5 else f"{pb_ratio:.2f} ❌"
@@ -22,15 +39,9 @@ def fetch_financials(ticker, yield_value):
         graham_value_display = f"{graham_value:.2f} ✅" if graham_value else "❌"
         eps_display = f"{eps:.2f}" if eps is not None else "N/A"
         bvps_display = f"{bvps:.2f}" if bvps is not None else "N/A"
+        price_display = f"{price:.2f}" if price else "N/A"
+        price_vs_gv = f"{price:.2f} ✅" if price and graham_value and price < graham_value else (f"{price:.2f} ❌" if price and graham_value else "N/A")
 
-        # Share price check
-        price_display = f"{price:.2f}" if price is not None else "N/A"
-        if price is not None and graham_value is not None:
-            price_vs_gv = f"{price:.2f} ✅" if price < graham_value else f"{price:.2f} ❌"
-        else:
-            price_vs_gv = "N/A"
-
-        # Count of passed criteria
         passed_count = sum([
             revenue > 100_000_000,
             current_ratio > 2,
@@ -54,3 +65,57 @@ def fetch_financials(ticker, yield_value):
         }
     except Exception as e:
         return None
+
+# === TICKER INPUT ===
+st.subheader("📥 Input Tickers")
+
+tickers = []
+
+# Manual
+manual_input = st.text_area("Type ticker symbols separated by commas (e.g., AAPL, MSFT, GOOG)")
+if manual_input:
+    tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
+
+# Upload
+uploaded_file = st.file_uploader("Or upload a CSV file with ticker symbols", type="csv")
+if uploaded_file is not None:
+    df_upload = pd.read_csv(uploaded_file)
+    tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
+
+tickers = list(set([t for t in tickers if t]))  # Clean & deduplicate
+
+# === RUN BUTTON ===
+if st.button("🚀 Run Screening"):
+    if not tickers:
+        st.warning("Please enter or upload at least one ticker.")
+    else:
+        with st.spinner("Running screen..."):
+            results = []
+            yield_value = fetch_aaa_yield()
+            progress = st.progress(0)
+            total = len(tickers)
+
+            for idx, t in enumerate(tickers):
+                data = fetch_financials(t, yield_value)
+                if data:
+                    results.append(data)
+                progress.progress((idx + 1) / total)
+
+            if results:
+                df = pd.DataFrame(results)
+                df_sorted = df.sort_values("Passed Count", ascending=False)
+                st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+                st.dataframe(df_sorted)
+
+                # Export
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                    df_sorted.to_excel(writer, index=False)
+                st.download_button(
+                    label="📥 Download Results as Excel",
+                    data=output.getvalue(),
+                    file_name="akab_screening_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.warning("No valid data returned.")
