@@ -11,9 +11,9 @@ st.markdown("_Find value. Avoid noise. Invest wisely._")
 
 # === FETCH AAA YIELD ===
 def fetch_aaa_yield():
-    return 4.4  # Placeholder for AAA bond yield
+    return 4.4  # Placeholder AAA bond yield
 
-# === CACHED FINANCIAL FETCH FUNCTION ===
+# === FINANCIAL FETCH FUNCTION ===
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, yield_value):
     try:
@@ -31,7 +31,7 @@ def fetch_financials(ticker, yield_value):
         graham_number = (15 * eps * 1.5 * bvps) ** 0.5 if eps and bvps and eps > 0 and bvps > 0 else None
         graham_value = eps * (8.5 + 2 * 0) * (4.4 / yield_value) if eps and eps > 0 else None
 
-        # Display format + pass/fail marks
+        # Format with pass/fail marks
         revenue_display = f"{revenue:,} ✅" if revenue > 100_000_000 else f"{revenue:,} ❌"
         current_ratio_display = f"{current_ratio:.2f} ✅" if current_ratio > 2 else f"{current_ratio:.2f} ❌"
         pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio < 1.5 else f"{pb_ratio:.2f} ❌"
@@ -40,7 +40,6 @@ def fetch_financials(ticker, yield_value):
         eps_display = f"{eps:.2f}" if eps is not None else "N/A"
         bvps_display = f"{bvps:.2f}" if bvps is not None else "N/A"
         price_display = f"{price:.2f}" if price else "N/A"
-        price_vs_gv = f"{price:.2f} ✅" if price and graham_value and price < graham_value else (f"{price:.2f} ❌" if price and graham_value else "N/A")
 
         passed_count = sum([
             revenue > 100_000_000,
@@ -60,13 +59,12 @@ def fetch_financials(ticker, yield_value):
             "Book Value": bvps_display,
             "Graham Number": graham_number_display,
             "Graham Value": graham_value_display,
-            "Price vs Graham Value": price_vs_gv,
             "Passed Count": passed_count
         }
     except Exception as e:
         return None
 
-# === TICKER INPUT ===
+# === INPUT SECTION ===
 st.subheader("📥 Input Tickers")
 
 tickers = []
