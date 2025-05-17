@@ -11,7 +11,7 @@ st.markdown("_Find value. Avoid noise. Invest wisely._")
 
 # === FETCH AAA YIELD ===
 def fetch_aaa_yield():
-    return 4.4  # Placeholder
+    return 4.4  # Placeholder for AAA bond yield
 
 # === CACHED FINANCIAL FETCH FUNCTION ===
 @st.cache_data(ttl=3600)
@@ -34,7 +34,7 @@ def fetch_financials(ticker, yield_value):
         # Display format + pass/fail marks
         revenue_display = f"{revenue:,} ✅" if revenue > 100_000_000 else f"{revenue:,} ❌"
         current_ratio_display = f"{current_ratio:.2f} ✅" if current_ratio > 2 else f"{current_ratio:.2f} ❌"
-        pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio > 1.5 else f"{pb_ratio:.2f} ❌"
+        pb_display = f"{pb_ratio:.2f} ✅" if pb_ratio < 1.5 else f"{pb_ratio:.2f} ❌"
         graham_number_display = f"{graham_number:.2f} ✅" if graham_number else "❌"
         graham_value_display = f"{graham_value:.2f} ✅" if graham_value else "❌"
         eps_display = f"{eps:.2f}" if eps is not None else "N/A"
@@ -45,7 +45,7 @@ def fetch_financials(ticker, yield_value):
         passed_count = sum([
             revenue > 100_000_000,
             current_ratio > 2,
-            pb_ratio > 1.5,
+            pb_ratio < 1.5,
             graham_number is not None,
             graham_value is not None
         ])
@@ -71,12 +71,12 @@ st.subheader("📥 Input Tickers")
 
 tickers = []
 
-# Manual
+# Manual input
 manual_input = st.text_area("Type ticker symbols separated by commas (e.g., AAPL, MSFT, GOOG)")
 if manual_input:
     tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
 
-# Upload
+# Upload option
 uploaded_file = st.file_uploader("Or upload a CSV file with ticker symbols", type="csv")
 if uploaded_file is not None:
     df_upload = pd.read_csv(uploaded_file)
@@ -107,7 +107,7 @@ if st.button("🚀 Run Screening"):
                 st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
                 st.dataframe(df_sorted)
 
-                # Export
+                # Export to Excel
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                     df_sorted.to_excel(writer, index=False)
