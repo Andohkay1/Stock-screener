@@ -139,6 +139,18 @@ if st.button("🚀 Run Screener"):
                 df_sorted = df.sort_values("Passed Count", ascending=False)
                 st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
                 st.dataframe(df_sorted)
+                st.markdown("### Understanding Your Results – Akab Model")
+st.markdown("""
+The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
+
+✅ A green check means the company meets that criterion.  
+❌ A red X means it does not.  
+**Passed Count** shows how many of the 7 criteria were met.
+
+The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
+
+Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
+""")
 
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
