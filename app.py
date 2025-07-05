@@ -134,32 +134,34 @@ if st.button("🚀 Run Screener"):
                     results.append(data)
                 progress.progress((idx + 1) / len(tickers))
 
-            if results:
-                df = pd.DataFrame(results)
-                df_sorted = df.sort_values("Passed Count", ascending=False)
-                st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-                st.dataframe(df_sorted)
-                st.markdown("### Understanding Your Results – Akab Model")
-st.markdown("""
-The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
+if results:
+    df = pd.DataFrame(results)
+    df_sorted = df.sort_values("Passed Count", ascending=False)
+    st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+    st.dataframe(df_sorted)
+    st.markdown("### Understanding Your Results – Akab Model")
 
-✅ A green check means the company meets that criterion.  
-❌ A red X means it does not.  
-**Passed Count** shows how many of the 7 criteria were met.
+    st.markdown("""
+    The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
 
-The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
+    ✅ A green check means the company meets that criterion.  
+    ❌ A red X means it does not.  
+    **Passed Count** shows how many of the 7 criteria were met.
 
-Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
-""")
+    The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                    df_sorted.to_excel(writer, index=False)
-                st.download_button(
-                    label="📥 Download Results as Excel",
-                    data=output.getvalue(),
-                    file_name="akab_screening_results.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            else:
-                st.warning("No valid data returned.")
+    Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
+    """)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df_sorted.to_excel(writer, index=False)
+
+    st.download_button(
+        label="📥 Download Results as Excel",
+        data=output.getvalue(),
+        file_name="akab_screening_results.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.warning("No valid data returned.")
