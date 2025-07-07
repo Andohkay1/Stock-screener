@@ -23,7 +23,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
         col = bs.columns[0] if not bs.empty else None
 
-        # Estimate CA and CL
         est_current_assets = 0
         est_total_liabilities = 0
 
@@ -48,7 +47,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             eps_values = [ni / shares_outstanding for ni in net_incomes if shares_outstanding > 0]
 
         eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
-
         if not eps_values:
             eps_values = [info.get("trailingEps", 0)] * 7
 
@@ -109,8 +107,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
 st.subheader("📥 Input Tickers")
 
-results = []  # ✅ Initialize to avoid NameError before button click
-
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -122,6 +118,8 @@ if uploaded_file is not None:
     tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
 
 tickers = list(set([t for t in tickers if t]))
+
+results = []  # ✅ FIXED: ensure results is always defined
 
 if st.button("🚀 Run Screener"):
     if not tickers:
@@ -140,19 +138,19 @@ if results:
     df_sorted = df.sort_values("Passed Count", ascending=False)
     st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
     st.dataframe(df_sorted)
+
     st.markdown("### Understanding Your Results – Akab Model")
-
     st.markdown("""
-The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
+    The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
 
-✅ A green check means the company meets that criterion.  
-❌ A red X means it does not.  
-**Passed Count** shows how many of the 7 criteria were met.
+    ✅ A green check means the company meets that criterion.  
+    ❌ A red X means it does not.  
+    **Passed Count** shows how many of the 7 criteria were met.
 
-The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
+    The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
 
-Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
-""")
+    Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
+    """)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -165,4 +163,4 @@ Use this as a signal to explore further. The model highlights opportunities, but
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("Awaiting screening results...")
+    st.warning("No valid data returned.")
