@@ -109,6 +109,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
 st.subheader("📥 Input Tickers")
 
+results = []  # ✅ Initialize to avoid NameError before button click
+
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -126,7 +128,6 @@ if st.button("🚀 Run Screener"):
         st.warning("Please enter or upload at least one ticker.")
     else:
         with st.spinner("Running screen..."):
-            results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
                 data = fetch_financials(t)
@@ -142,16 +143,16 @@ if results:
     st.markdown("### Understanding Your Results – Akab Model")
 
     st.markdown("""
-    The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
+The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
 
-    ✅ A green check means the company meets that criterion.  
-    ❌ A red X means it does not.  
-    **Passed Count** shows how many of the 7 criteria were met.
+✅ A green check means the company meets that criterion.  
+❌ A red X means it does not.  
+**Passed Count** shows how many of the 7 criteria were met.
 
-    The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
+The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
 
-    Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
-    """)
+Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
+""")
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -164,4 +165,4 @@ if results:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.warning("No valid data returned.")
+    st.info("Awaiting screening results...")
