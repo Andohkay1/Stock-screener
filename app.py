@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 import io
+import time
 
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
@@ -22,21 +23,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
 
         col = bs.columns[0] if not bs.empty else None
-        est_current_assets = 0
-        est_total_liabilities = 0
 
+        est_current_assets, est_total_liabilities = 0, 0
         if col:
             if "Total Current Assets" in bs.index:
                 est_current_assets = bs.loc["Total Current Assets", col]
             else:
-                est_current_assets = sum([
-                    bs.loc[key, col] if key in bs.index else 0
-                    for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
+                est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                    "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
                 ])
-
-            est_total_liabilities = sum([
-                bs.loc[key, col] if key in bs.index else 0
-                for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"]
+            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
             ])
 
         eps_values = []
@@ -56,8 +53,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         if len(eps_values) >= 2:
             valid_eps = [eps for eps in eps_values if eps > 0]
             if len(valid_eps) >= 2:
-                oldest = valid_eps[0]
-                latest = valid_eps[-1]
+                oldest, latest = valid_eps[0], valid_eps[-1]
                 if oldest > 0:
                     eps_growth = (latest - oldest) / oldest
 
@@ -104,8 +100,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-st.subheader("📥 Input Tickers")
-
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -118,28 +112,28 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
-results = []  # Initialize to avoid NameError
-
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
     else:
         with st.spinner("Running screen..."):
+            results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
+                time.sleep(1.5)  # Delay to avoid rate limiting
                 data = fetch_financials(t)
                 if data:
                     results.append(data)
                 progress.progress((idx + 1) / len(tickers))
 
-if results:
-    df = pd.DataFrame(results)
-    df_sorted = df.sort_values("Passed Count", ascending=False)
-    st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-    st.dataframe(df_sorted)
+        if results:
+            df = pd.DataFrame(results)
+            df_sorted = df.sort_values("Passed Count", ascending=False)
+            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+            st.dataframe(df_sorted)
 
-    st.markdown("### Understanding Your Results – Akab Model")
-    st.markdown("""
+            st.markdown("### Understanding Your Results – Akab Model")
+            st.markdown("""
 The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
 
 ✅ A green check means the company meets that criterion.  
@@ -151,15 +145,15 @@ The **Graham Number** and **Graham Value** provide benchmarks for fair valuation
 Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
 """)
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df_sorted.to_excel(writer, index=False)
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df_sorted.to_excel(writer, index=False)
 
-    st.download_button(
-        label="📥 Download Results as Excel",
-        data=output.getvalue(),
-        file_name="akab_screening_results.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-else:
-    st.info("Enter tickers above and click 'Run Screener' to start.")
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=output.getvalue(),
+                file_name="akab_screening_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No valid data returned.")
