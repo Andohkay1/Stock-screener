@@ -224,16 +224,18 @@ if st.button("🚀 Run Screener"):
                             valuation_insight = "mixed valuation: price below Graham Number but above Graham Value"
 
                     # ===== STRENGTH NOTE =====
-                    if current_assets is None or total_liabilities is None or np.isnan(current_assets) or np.isnan(total_liabilities):
-                        strength_note = "Insufficient data for strength check"
-                    elif current_ratio < 1:
-                        strength_note = "Weak liquidity: Current Ratio below 1 and Current Assets insufficient"
-                    elif current_assets > total_liabilities * 1.2 and current_ratio >= 2:
-                        strength_note = "Strong liquidity: Current Assets comfortably cover Total Liabilities and Current Ratio healthy"
-                    elif current_assets >= total_liabilities and current_ratio >= 1.5:
-                        strength_note = "Adequate liquidity: Current Assets cover Total Liabilities and Current Ratio moderate"
+                    if current_assets >= total_liabilities:
+                        if current_ratio >= 2:
+                            strength_note = "Strong liquidity: Current Assets comfortably cover Total Liabilities and Current Ratio healthy."
+                        elif current_ratio >= 1.5:
+                            strength_note = "Adequate liquidity: Current Assets cover Total Liabilities and Current Ratio moderate."
+                        else:
+                            strength_note = "Current Assets cover Total Liabilities but Current Ratio low; operational model may justify."
                     else:
-                        strength_note = "Caution: Current Assets may cover Total Liabilities but Current Ratio is low"
+                        if current_ratio >= 1:
+                            strength_note = "Working capital negative, but Current Ratio acceptable. Likely normal for operational model."
+                        else:
+                            strength_note = "Caution: Negative working capital and low Current Ratio may indicate liquidity pressure."
 
                     # ===== FINANCIAL STRENGTH DYNAMIC =====
                     earnings_positive_5y = r["Positive EPS for 5Y"].startswith("Yes")
@@ -248,6 +250,17 @@ if st.button("🚀 Run Screener"):
                     else:
                         financial_strength = "Earnings inconsistent and does not pay dividends."
 
+                    # ===== RISK NOTE =====
+                    risk_note = "Consider market conditions."
+                    if "overvalued" in valuation_insight:
+                        risk_note = "Valuation risk: Price above Graham Number and Value. Consider market sensitivity."
+                    elif "undervalued" in valuation_insight:
+                        risk_note = "Valuation appears favorable, but monitor market fluctuations."
+                    elif "mixed" in valuation_insight:
+                        risk_note = "Mixed valuation: Exercise caution and monitor market trends."
+                    if "Caution" in strength_note or "low" in strength_note.lower():
+                        risk_note += " Also note potential liquidity risk."
+
                     news_text = fetch_news(r["Ticker"])
 
                     st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
@@ -256,7 +269,7 @@ if st.button("🚀 Run Screener"):
                                 f"**Financial Strength:** {financial_strength}\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** Consider valuation sensitivity and market conditions.\n\n"
+                                f"**Risk Note:** {risk_note}\n\n"
                                 f"**Recent News:** {news_text}\n")
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
