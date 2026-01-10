@@ -81,6 +81,14 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
+        # Metrics object for investment summary
+        metrics = {
+            "price": current_price,
+            "graham_number": graham_number if not np.isnan(graham_number) else float("inf"),
+            "pb_ratio": pb_ratio,
+            "current_ratio": current_ratio
+        }
+
         return {
             "Ticker": ticker,
             "Price": f"${current_price:.2f}" if current_price else "N/A",
@@ -93,13 +101,66 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A"
+            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
+            "metrics": metrics,  # For investment summary
+            "criteria": criteria,
+            "eps_values": eps_values,
+            "eps_growth": eps_growth,
+            "bvps": bvps
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
+
+# ---- NEW FUNCTION: Generate investment notes/memo ----
+def generate_stock_notes(ticker, metrics, criteria, passed):
+    stock = yf.Ticker(ticker)
+    info = stock.info
+
+    business = info.get("longBusinessSummary", "Business description not available.")
+    sector = info.get("sector", "Unknown sector")
+    industry = info.get("industry", "Unknown industry")
+    short_business = business.split(".")[0] + "." if business else f"Company in {industry} sector."
+
+    # Valuation insight
+    valuation_notes = []
+    if metrics["price"] < metrics["graham_number"]:
+        valuation_notes.append("The stock trades below its estimated intrinsic value (Graham Number).")
+    if metrics["pb_ratio"] < 1.5:
+        valuation_notes.append("Price-to-book ratio is below 1.5, indicating potential undervaluation.")
+    valuation_text = " ".join(valuation_notes) if valuation_notes else "Valuation metrics are neutral."
+
+    # Financial strength
+    fs_notes = []
+    if metrics["current_ratio"] > 2:
+        fs_notes.append("Strong liquidity position (Current Ratio > 2).")
+    if criteria.get("Positive EPS for 5 Years", False):
+        fs_notes.append("Earnings consistently positive for 5 years.")
+    if criteria.get("Pays Dividends", False):
+        fs_notes.append("Pays regular dividends.")
+    fs_text = " ".join(fs_notes) if fs_notes else "Limited balance sheet/earnings data."
+
+    # Screening rationale
+    screening_text = f"Passed {passed} of 7 Akab screening criteria."
+
+    # Risk note
+    risk_notes = []
+    if metrics["pb_ratio"] > 1.2:
+        risk_notes.append("valuation sensitivity")
+    if metrics["current_ratio"] < 2:
+        risk_notes.append("liquidity constraints")
+    if sector in ["Energy", "Materials", "Industrials"]:
+        risk_notes.append("cyclical sector exposure")
+    risk_text = "Key considerations include " + ", ".join(risk_notes) + "." if risk_notes else ""
+
+    # Compile
+    summary = f"{short_business}\n\nValuation Insight: {valuation_text}\n\nFinancial Strength: {fs_text}\n\nScreening Rationale: {screening_text}\n\nRisk Note: {risk_text}"
+    return summary
+
+
+# ---------------- STREAMLIT UI ----------------
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -131,6 +192,14 @@ if st.button("🚀 Run Screener"):
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
             st.dataframe(df_sorted)
+
+            # ---- INVESTMENT NOTES ----
+            st.markdown("### 📌 Investment Notes (Akab Model)")
+            if st.checkbox("Show Investment Memos"):
+                for _, row in df_sorted.iterrows():
+                    summary = generate_stock_notes(row["Ticker"], row["metrics"], row["criteria"], row["Passed Count"])
+                    with st.expander(f"{row['Ticker']} – Investment Summary"):
+                        st.write(summary)
 
             st.markdown("### Understanding Your Results – Akab Model")
             st.markdown("""
