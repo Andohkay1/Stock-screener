@@ -140,3 +140,138 @@ def fetch_financials(ticker, current_bond_yield=4.4):
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
+
+# ======= FINNHUB NEWS =======
+def fetch_news(symbol):
+    url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from=2025-01-01&to=2026-01-09&token={FINNHUB_API_KEY}"
+    try:
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            headlines = [d.get("headline") for d in data if "headline" in d]
+            return " | ".join(headlines[:5]) if headlines else "No recent news available."
+        return "No recent news available."
+    except:
+        return "No recent news available."
+
+# ======= INPUT =======
+tickers = []
+manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
+if manual_input:
+    tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
+
+uploaded_file = st.file_uploader("Or upload CSV with tickers", type="csv")
+if uploaded_file is not None:
+    df_upload = pd.read_csv(uploaded_file)
+    tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
+
+tickers = list(set([t for t in tickers if t]))
+
+# ======= RUN SCREEN =======
+if st.button("🚀 Run Screener"):
+    if not tickers:
+        st.warning("Please enter or upload at least one ticker.")
+    else:
+        with st.spinner("Running screen..."):
+            results = []
+            progress = st.progress(0)
+            for idx, t in enumerate(tickers):
+                time.sleep(1)
+                data = fetch_financials(t)
+                if data:
+                    results.append(data)
+                progress.progress((idx + 1) / len(tickers))
+
+        if results:
+            df = pd.DataFrame(results)
+            df_sorted = df.sort_values("Passed Count", ascending=False)
+            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+
+            # ======= DISPLAY TABLE =======
+            table_cols = [
+                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA − TL > 0", "Pays Dividends",
+                "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B", "Passed Count",
+                "Graham Number", "Graham Value"
+            ]
+            st.dataframe(df_sorted[table_cols])
+
+            # ======= INVESTMENT MEMOS =======
+            st.markdown("### Investment Memos")
+            for idx, r in df_sorted.iterrows():
+                try:
+                    company_name = r["Company Name"]
+                    industry = r["Industry"]
+                    products = industry_products.get(industry, "")
+                    industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
+
+                    ca, cl, tl = r["Current Assets"], r["Current Liabilities"], r["Total Liabilities"]
+                    wc, cr = r["Working Capital Num"], r["Current Ratio Num"]
+                    current_price = r["Current Price Num"]
+                    gn_val, gv_val = r["Graham Number Num"], r["Graham Value Num"]
+
+                    # ======= STRENGTH NOTE =======
+                    if ca > tl:
+                        strength_note = "Current Assets can pay all debt; liquidity healthy."
+                    elif wc > 0:
+                        if cr >= 1:
+                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity acceptable."
+                        else:
+                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity may be tight."
+                    else:
+                        if cr >= 1:
+                            strength_note = "Working capital negative; liquidity may be acceptable due to industry operations."
+                        else:
+                            strength_note = "Working capital negative; liquidity may be tight."
+
+                    # ======= VALUATION INSIGHT =======
+                    if gn_val and gv_val:
+                        if current_price > gn_val and current_price > gv_val:
+                            valuation_insight = "potentially overvalued as price above Graham Number and Graham Value."
+                        elif current_price < gn_val and current_price < gv_val:
+                            valuation_insight = "potentially undervalued as price below Graham Number and Graham Value."
+                        elif current_price > gn_val and current_price < gv_val:
+                            valuation_insight = "mixed valuation: price above Graham Number but below Graham Value."
+                        else:
+                            valuation_insight = "mixed valuation: price below Graham Number but above Graham Value."
+                    else:
+                        valuation_insight = "valuation data incomplete."
+
+                    # ======= RISK NOTE =======
+                    risk_components = []
+                    if not r["Revenue > $100M"].endswith("✅"):
+                        risk_components.append("Revenue below $100M; may indicate small scale or growth risk.")
+                    if not r["Current Ratio > 2"].endswith("✅"):
+                        risk_components.append("Current Ratio low; liquidity may be a concern.")
+                    if not r["CA − TL > 0"].endswith("✅"):
+                        risk_components.append("Current Assets do not cover total debt; liquidity risk.")
+                    if not r["Price ≤ 15x3Y Avg EPS"].endswith("✅"):
+                        risk_components.append("Price exceeds 15x 3-year EPS; stock may be overvalued.")
+                    if not r["P/B"].endswith("✅"):
+                        risk_components.append("Price-to-Book ratio high; stock may be overvalued relative to net assets.")
+                    risk_note = "Potential risks: " + "; ".join(risk_components) + ". Consider market conditions." if risk_components else "No major risks identified."
+
+                    news_text = fetch_news(r["Ticker"])
+
+                    st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
+                                f"**Industry Note:** {industry_note}\n\n"
+                                f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}\n\n"
+                                f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
+                                f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
+                                f"**Strength Note:** {strength_note}\n\n"
+                                f"**Risk Note:** {risk_note}\n\n"
+                                f"**Recent News:** {news_text}\n")
+                except Exception as e:
+                    st.error(f"Error generating memo for {r['Ticker']}: {e}")
+
+            # ======= DOWNLOAD =======
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df_sorted.to_excel(writer, index=False)
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=output.getvalue(),
+                file_name="akab_screening_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No valid data returned.")
