@@ -132,8 +132,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} ✅" if graham_number else "N/A ❌",
-            "Graham Value": f"${graham_value:.2f} ✅" if graham_value else "N/A ❌",
+            "Graham Number": (
+            f"${graham_number:.2f} ✅" if graham_number and current_price <= graham_number 
+            else f"${graham_number:.2f} ❌" if graham_number 
+            else "N/A ❌"
+            ),
+            "Graham Value": (
+            f"${graham_value:.2f} ✅" if graham_value and current_price <= graham_value 
+            else f"${graham_value:.2f} ❌" if graham_value 
+            else "N/A ❌"
+            ),
+
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
