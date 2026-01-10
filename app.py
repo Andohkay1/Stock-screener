@@ -38,20 +38,31 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # Current Assets estimate
-        current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
-            "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
-        ]) if col else info.get("totalCurrentAssets", 0) or 0
+        # ===== Current Assets =====
+        current_assets = 0
+        if col and not bs.empty:
+            current_assets = sum(
+                bs.loc[key, col] if key in bs.index and not pd.isna(bs.loc[key, col]) else 0
+                for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
+            )
+        current_assets = float(current_assets or info.get("totalCurrentAssets", 0) or 0)
 
-        # Current Liabilities estimate
-        current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
-            "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
-        ]) if col else info.get("currentLiabilities", 0) or 0
+        # ===== Current Liabilities =====
+        current_liabilities = 0
+        if col and not bs.empty:
+            current_liabilities = sum(
+                bs.loc[key, col] if key in bs.index and not pd.isna(bs.loc[key, col]) else 0
+                for key in ["AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"]
+            )
+        current_liabilities = float(current_liabilities or info.get("currentLiabilities", 0) or 0)
 
-        # Total Liabilities estimate
-        total_liabilities = info.get("totalLiab", current_liabilities) or current_liabilities
+        # ===== Total Liabilities =====
+        total_liabilities = float(info.get("totalLiab", 0) or current_liabilities)
 
-        # EPS calculations
+        # ===== Working Capital =====
+        working_capital = current_assets - current_liabilities
+
+        # ===== EPS Calculations =====
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -65,7 +76,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         eps_7yr_avg = np.mean(eps_values[-7:]) if len(eps_values) >= 3 else np.mean(eps_values)
         eps_5yr_avg = np.mean(eps_values[-5:]) if len(eps_values) >= 3 else np.mean(eps_values)
 
-        # EPS growth
+        # EPS Growth
         eps_growth = 0
         if len(eps_values) >= 2:
             valid_eps = [eps for eps in eps_values if eps > 0]
@@ -74,11 +85,12 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                 if oldest > 0:
                     eps_growth = (latest - oldest) / oldest
 
+        # Graham Calculations
         bvps = info.get("bookValue", 0)
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
-        # Screening metrics
+        # Screening Metrics
         current_ratio = info.get("currentRatio", 0) or (current_assets / current_liabilities if current_liabilities else 0)
         revenue = info.get("totalRevenue", 0)
         pb_ratio = info.get("priceToBook", 0)
@@ -86,11 +98,11 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # --- Criteria ---
+        # --- Screening Criteria ---
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
-            "CA - L > 0": current_assets > total_liabilities,  # strictly greater
+            "CA - L > 0": current_assets > total_liabilities,
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": current_price <= price_ceiling,
@@ -114,10 +126,12 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Graham Value": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
-            "Current Assets": float(current_assets or 0),
-            "Current Liabilities": float(current_liabilities or 0),
-            "Total Liabilities": float(total_liabilities or 0),
-            "Current Ratio Num": float(current_ratio or 0),
+            "Current Assets": current_assets,
+            "Current Liabilities": current_liabilities,
+            "Total Liabilities": total_liabilities,
+            "Current Ratio Num": current_ratio,
+            "Working Capital": working_capital,
+            "Failed Criteria": [k for k, v in criteria.items() if not v],  # for dynamic Risk Note
         }
 
     except Exception as e:
@@ -199,10 +213,10 @@ if st.button("🚀 Run Screener"):
                     )
 
                     # ======= Strength Note =======
-                    ca = float(r.get("Current Assets", 0) or 0)
-                    cl = float(r.get("Current Liabilities", 0) or 0)
-                    tl = float(r.get("Total Liabilities", 0) or 0)
-                    wc = ca - cl
+                    ca = r.get("Current Assets", 0)
+                    cl = r.get("Current Liabilities", 0)
+                    tl = r.get("Total Liabilities", 0)
+                    wc = r.get("Working Capital", 0)
 
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
@@ -210,6 +224,13 @@ if st.button("🚀 Run Screener"):
                         strength_note = "Working capital positive; Current Assets do not cover total debt."
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
+
+                    # ======= Dynamic Risk Note =======
+                    failed_criteria = r.get("Failed Criteria", [])
+                    if failed_criteria:
+                        risk_note = "Potential risks: " + ", ".join(failed_criteria) + ". Consider valuation sensitivity and market conditions."
+                    else:
+                        risk_note = "No major screening risks identified. Consider general market conditions."
 
                     news_text = fetch_news(r["Ticker"])
 
@@ -219,7 +240,7 @@ if st.button("🚀 Run Screener"):
                                 f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** Consider valuation sensitivity and market conditions.\n\n"
+                                f"**Risk Note:** {risk_note}\n\n"
                                 f"**Recent News:** {news_text}\n")
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
