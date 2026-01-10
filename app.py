@@ -38,7 +38,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # Current Assets
+        # ===== Current Assets =====
         current_assets = 0
         if col and not bs.empty:
             current_assets = sum(
@@ -47,7 +47,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_assets = float(current_assets or info.get("totalCurrentAssets", 0) or 0)
 
-        # Current Liabilities
+        # ===== Current Liabilities =====
         current_liabilities = 0
         if col and not bs.empty:
             current_liabilities = sum(
@@ -56,13 +56,13 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_liabilities = float(current_liabilities or info.get("currentLiabilities", 0) or 0)
 
-        # Total Liabilities
+        # ===== Total Liabilities =====
         total_liabilities = float(info.get("totalLiab", 0) or current_liabilities)
 
-        # Working Capital
+        # ===== Working Capital =====
         working_capital = current_assets - current_liabilities
 
-        # EPS Calculations
+        # ===== EPS Calculations =====
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -87,18 +87,18 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
         # Graham Calculations
         bvps = info.get("bookValue", 0)
-        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
-        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
+        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
+        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
         # Screening Metrics
         current_ratio = info.get("currentRatio", 0) or (current_assets / current_liabilities if current_liabilities else 0)
         revenue = info.get("totalRevenue", 0)
         pb_ratio = info.get("priceToBook", 0)
-        current_price = info.get("currentPrice", 0)
+        current_price = info.get("currentPrice", 0) or np.nan
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # Screening Criteria
+        # --- Screening Criteria ---
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -126,7 +126,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
         return {
             "Ticker": ticker,
-            "Price": current_price,
+            "Price": float(current_price),
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
             "CA - L > 0": f"{(current_assets - total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
@@ -135,8 +135,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": graham_number,
-            "Graham Value": graham_value,
+            "Graham Number": float(graham_number),
+            "Graham Value": float(graham_value),
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
@@ -164,130 +164,3 @@ def fetch_news(symbol):
         return "No recent news available."
     except:
         return "No recent news available."
-
-# ======= INPUT =======
-tickers = []
-manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
-if manual_input:
-    tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
-
-uploaded_file = st.file_uploader("Or upload CSV with tickers", type="csv")
-if uploaded_file is not None:
-    df_upload = pd.read_csv(uploaded_file)
-    tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
-
-tickers = list(set([t for t in tickers if t]))
-
-# ======= RUN SCREEN =======
-if st.button("🚀 Run Screener"):
-    if not tickers:
-        st.warning("Please enter or upload at least one ticker.")
-    else:
-        with st.spinner("Running screen..."):
-            results = []
-            progress = st.progress(0)
-            for idx, t in enumerate(tickers):
-                time.sleep(1.2)
-                data = fetch_financials(t)
-                if data:
-                    results.append(data)
-                progress.progress((idx + 1) / len(tickers))
-
-        if results:
-            df = pd.DataFrame(results)
-            df_sorted = df.sort_values("Passed Count", ascending=False)
-
-            # Add ✅/❌ for Graham Number and Value
-            def mark_graham(price, gn, gv):
-                gn_mark = "✅" if gn and price <= gn else "❌"
-                gv_mark = "✅" if gv and price <= gv else "❌"
-                gn_display = f"{gn:,.2f} {gn_mark}" if gn else "N/A ❌"
-                gv_display = f"{gv:,.2f} {gv_mark}" if gv else "N/A ❌"
-                return gn_display, gv_display
-
-            df_sorted["Graham Number"], df_sorted["Graham Value"] = zip(*df_sorted.apply(
-                lambda x: mark_graham(x["Price"], x["Graham Number"], x["Graham Value"]), axis=1
-            ))
-
-            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-
-            # ======= DISPLAY TABLE =======
-            table_cols = [
-                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0",
-                "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS",
-                "P/B", "Passed Count", "Graham Number", "Graham Value"
-            ]
-            st.dataframe(df_sorted[table_cols])
-
-            # ======= INVESTMENT MEMOS =======
-            st.markdown("### Investment Memos")
-            for idx, r in df_sorted.iterrows():
-                try:
-                    company_name = r["Company Name"]
-                    industry = r["Industry"]
-                    products = industry_products.get(industry, "")
-                    industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
-
-                    # Valuation insight
-                    current_price = r["Price"]
-                    gn_val = r["Graham Number"]
-                    gv_val = r["Graham Value"]
-                    valuation_insight = (
-                        "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
-                        else "potentially undervalued as price below graham value and number" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
-                        else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price < gv_val)
-                        else "mixed valuation as price is below the Graham Number but above the Graham Value"
-                    )
-
-                    # ======= Strength Note =======
-                    ca = r.get("Current Assets", 0)
-                    cl = r.get("Current Liabilities", 0)
-                    tl = r.get("Total Liabilities", 0)
-                    wc = r.get("Working Capital", 0)
-                    current_ratio = r.get("Current Ratio Num", 0)
-
-                    if ca > tl and current_ratio > 2:
-                        strength_note = "Current Assets can pay all debt; liquidity healthy."
-                    elif wc >= 0 and current_ratio >= 1:
-                        strength_note = "Working capital positive; liquidity may be acceptable."
-                    else:
-                        strength_note = "Working capital negative; liquidity may be tight."
-
-                    # ======= Dynamic Descriptive Risk Note =======
-                    failed_criteria = r.get("Failed Criteria", [])
-                    criteria_risks = r.get("Criteria Risks", {})
-
-                    # Exclude liquidity metrics from risk note
-                    risk_exclude = []
-                    filtered_failed = [c for c in failed_criteria if c not in risk_exclude]
-
-                    if filtered_failed:
-                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in filtered_failed]) + ". Consider market conditions."
-                    else:
-                        risk_note = "No major screening risks identified. Consider general market conditions."
-
-                    news_text = fetch_news(r["Ticker"])
-
-                    st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
-                                f"**Industry Note:** {industry_note}\n\n"
-                                f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
-                                f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
-                                f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
-                                f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** {risk_note}\n\n"
-                                f"**Recent News:** {news_text}\n")
-                except Exception as e:
-                    st.error(f"Error generating memo for {r['Ticker']}: {e}")
-
-            # ======= DOWNLOAD =======
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                df_sorted.to_excel(writer, index=False)
-            st.download_button(
-                label="📥 Download Results as Excel",
-                data=output.getvalue(),
-                file_name="akab_screening_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.warning("No valid data returned.")
