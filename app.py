@@ -39,19 +39,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         col = bs.columns[0] if not bs.empty else None
 
         # Current Assets estimate
-        est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+        current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
         ]) if col else info.get("totalCurrentAssets", 0) or 0
 
-        # Total Liabilities estimate
-        est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
-            "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
-        ]) if col else info.get("totalLiab", 0) or 0
-
-        # Current Liabilities for working capital
-        est_current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+        # Current Liabilities estimate
+        current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
         ]) if col else info.get("currentLiabilities", 0) or 0
+
+        # Total Liabilities estimate
+        total_liabilities = info.get("totalLiab", current_liabilities) or current_liabilities
 
         # EPS calculations
         eps_values = []
@@ -91,7 +89,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
-            "CA - L > 0": est_current_assets >= est_total_liabilities,
+            "CA - L > 0": current_assets >= total_liabilities,
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": current_price <= price_ceiling,
@@ -105,7 +103,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price": current_price,
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "CA - L > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
+            "CA - L > 0": f"{(current_assets - total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {mark(criteria['Positive EPS for 5Y'])}",
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
@@ -115,9 +113,9 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Graham Value": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
-            "Current Assets": est_current_assets,
-            "Current Liabilities": est_current_liabilities,
-            "Total Liabilities": est_total_liabilities,
+            "Current Assets": current_assets,
+            "Current Liabilities": current_liabilities,
+            "Total Liabilities": total_liabilities,
             "Current Ratio Num": current_ratio,
         }
 
@@ -199,16 +197,16 @@ if st.button("🚀 Run Screener"):
                         else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
-                    # Strength Note (dynamic)
-                    current_assets = r["Current Assets"] or 0
-                    current_liabilities = r["Current Liabilities"] or 0
-                    total_liabilities = r["Total Liabilities"] or 0
-                    working_capital = current_assets - current_liabilities
+                    # ======= Strength Note =======
+                    ca = r["Current Assets"] or 0
+                    cl = r["Current Liabilities"] or 0
+                    tl = r["Total Liabilities"] or 0
+                    wc = ca - cl
 
-                    if current_assets >= total_liabilities:
+                    if ca >= tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
-                    elif working_capital >= 0:
-                        strength_note = "Working capital positive; Current Assets do not cover all debt."
+                    elif wc >= 0:
+                        strength_note = "Working capital positive; Current Assets do not cover total debt."
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
 
