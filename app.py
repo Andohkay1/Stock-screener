@@ -242,8 +242,13 @@ if st.button("🚀 Run Screener"):
                     # ======= Dynamic Descriptive Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
                     criteria_risks = r.get("Criteria Risks", {})
-                    if failed_criteria:
-                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in failed_criteria]) + ". Consider market conditions."
+
+                    # Exclude liquidity metrics from risk note
+                    risk_exclude = ["Current Ratio > 2", "CA - L > 0"]
+                    filtered_failed = [c for c in failed_criteria if c not in risk_exclude]
+
+                    if filtered_failed:
+                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in filtered_failed]) + ". Consider market conditions."
                     else:
                         risk_note = "No major screening risks identified. Consider general market conditions."
 
