@@ -31,11 +31,6 @@ industry_products = {
 }
 
 # ======= HELPER FUNCTIONS =======
-def parse_money(value):
-    if isinstance(value, str):
-        return float(value.replace("$", "").replace(",", ""))
-    return value
-
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
@@ -48,16 +43,18 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         # Current Assets and Liabilities
         ca_keys = ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
         cl_keys = ["AccountsPayable", "OtherCurrentLiabilities", "TaxPayable", "ShortLongTermDebt"]
-
-        est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in ca_keys) if col else 0
-        est_current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in cl_keys) if col else 0
-
-        # Total Liabilities
         tl_keys = ["TotalLiab"]
-        est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in tl_keys) if col else 0
+
+        ca = sum(bs.loc[key, col] if key in bs.index else 0 for key in ca_keys) if col else 0
+        cl = sum(bs.loc[key, col] if key in bs.index else 0 for key in cl_keys) if col else 0
+        tl = sum(bs.loc[key, col] if key in bs.index else 0 for key in tl_keys) if col else 0
 
         # Working capital
-        wc = est_current_assets - est_current_liabilities
+        wc = ca - cl
+
+        # CA vs TL
+        ca_vs_tl = ca - tl
+        ca_vs_tl_flag = ca > tl
 
         # EPS calculations
         eps_values = []
@@ -97,6 +94,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
+            "CA − TL > 0": ca_vs_tl_flag,
             "Working Capital Positive": wc > 0,
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
@@ -111,6 +109,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
+            "CA − TL > 0": f"{ca_vs_tl:,.0f} {mark(criteria['CA − TL > 0'])}",
             "Working Capital Positive": f"{wc:,.0f} {mark(criteria['Working Capital Positive'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {mark(criteria['Positive EPS for 5Y'])}",
@@ -119,13 +118,15 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
             "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
-            "Current Assets": est_current_assets,
-            "Current Liabilities": est_current_liabilities,
-            "Total Liabilities": est_total_liabilities,
+            "Current Assets": ca,
+            "Current Liabilities": cl,
+            "Total Liabilities": tl,
             "Working Capital Num": wc,
             "Current Ratio Num": current_ratio,
+            "CA vs TL Num": ca_vs_tl,
+            "CA vs TL Flag": ca_vs_tl_flag,
             "Current Price Num": current_price,
-            "Price Ceiling Num": price_ceiling,  # <--- added
+            "Price Ceiling Num": price_ceiling,
             "Graham Number Num": graham_number,
             "Graham Value Num": graham_value,
             "Industry": info.get("industry", "N/A"),
@@ -183,8 +184,9 @@ if st.button("🚀 Run Screener"):
 
             # ======= DISPLAY TABLE =======
             table_cols = [
-                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "Working Capital Positive", 
-                "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B", "Passed Count",
+                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2",
+                "CA − TL > 0", "Working Capital Positive", "Pays Dividends",
+                "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B", "Passed Count",
                 "Graham Number", "Graham Value"
             ]
             st.dataframe(df_sorted[table_cols])
@@ -197,7 +199,7 @@ if st.button("🚀 Run Screener"):
                     industry = r["Industry"]
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
-                    
+
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
