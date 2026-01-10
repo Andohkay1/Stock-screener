@@ -86,10 +86,11 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
+        # --- Criteria ---
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
-            "CA - L > 0": current_assets >= total_liabilities,
+            "CA - L > 0": current_assets > total_liabilities,  # strictly greater
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": current_price <= price_ceiling,
@@ -203,7 +204,7 @@ if st.button("🚀 Run Screener"):
                     tl = float(r.get("Total Liabilities", 0) or 0)
                     wc = ca - cl
 
-                    if ca >= tl:
+                    if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
                     elif wc >= 0:
                         strength_note = "Working capital positive; Current Assets do not cover total debt."
