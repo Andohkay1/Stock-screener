@@ -28,47 +28,37 @@ industry_products = {
     "Financial Services": "offers banking, insurance, investment, and capital markets services.",
     "Industrial Metals & Mining": "produces and sells steel, aluminum, copper, and other industrial metals.",
     "Internet Content & Information": "provides search, advertising, cloud computing, and related internet services.",
+    # add more industries here
 }
 
 # ======= HELPER FUNCTIONS =======
+def parse_money(value):
+    if isinstance(value, str):
+        return float(value.replace("$", "").replace(",", ""))
+    return value
+
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-
-        # Balance sheet
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
+        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
+        # Current Assets and Liabilities estimate
         ca_keys = ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
-        cl_keys = ["AccountsPayable", "OtherCurrentLiabilities", "TaxPayable", "ShortLongTermDebt"]
-        tl_keys = ["TotalLiab"]
-
-        def safe_sum(keys):
-            total = 0
-            for key in keys:
-                try:
-                    val = bs.loc[key, col] if key in bs.index else 0
-                    if pd.isna(val):
-                        val = 0
-                    total += val
-                except:
-                    total += 0
-            return total
-
-        # Force numeric values
-        ca = float(safe_sum(ca_keys) if col else 0) or 0
-        cl = float(safe_sum(cl_keys) if col else 0) or 0
-        tl = float(safe_sum(tl_keys) if col else 0) or 0
-        wc = ca - cl
+        cl_keys = ["TotalCurrentLiabilities"]
+        est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in ca_keys) if col else 0
+        est_current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in cl_keys) if col else 0
+        est_total_liabilities = info.get("totalLiab", 0) or 0
 
         # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
-        inc = stock.financials if not stock.financials.empty else pd.DataFrame()
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
             net_incomes = inc.loc["Net Income"].dropna().values
             eps_values = [ni / shares_outstanding for ni in net_incomes if shares_outstanding > 0]
+
         eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
         if not eps_values:
             eps_values = [info.get("trailingEps", 0)] * 7
@@ -78,31 +68,28 @@ def fetch_financials(ticker, current_bond_yield=4.4):
 
         # EPS growth
         eps_growth = 0
-        if len(eps_values) >= 2:
-            valid_eps = [eps for eps in eps_values if eps > 0]
-            if len(valid_eps) >= 2:
-                oldest, latest = valid_eps[0], valid_eps[-1]
-                if oldest > 0:
-                    eps_growth = (latest - oldest) / oldest
+        valid_eps = [eps for eps in eps_values if eps > 0]
+        if len(valid_eps) >= 2:
+            oldest, latest = valid_eps[0], valid_eps[-1]
+            if oldest > 0:
+                eps_growth = (latest - oldest) / oldest
 
         bvps = info.get("bookValue", 0)
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
         # Screening metrics
-        current_ratio = info.get("currentRatio", 0) or 0
-        revenue = info.get("totalRevenue", 0) or 0
-        pb_ratio = info.get("priceToBook", 0) or 0
-        current_price = info.get("currentPrice", 0) or 0
-        dividend_rate = info.get("dividendRate", 0) or 0
+        current_ratio = info.get("currentRatio", 0)
+        revenue = info.get("totalRevenue", 0)
+        pb_ratio = info.get("priceToBook", 0)
+        current_price = info.get("currentPrice", 0)
+        dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
-
-        ca_vs_tl_flag = ca > tl
 
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
-            "CA − TL > 0": ca_vs_tl_flag,
+            "CA - L > 0": est_current_assets > est_total_liabilities,
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": current_price <= price_ceiling,
@@ -111,12 +98,13 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         mark = lambda val: "✅" if val else "❌"
 
+        # Convert values for table display
         return {
             "Ticker": ticker,
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "CA − TL > 0": f"{ca - tl:,.0f} {mark(criteria['CA − TL > 0'])}",
+            "CA - L > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {mark(criteria['Positive EPS for 5Y'])}",
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
@@ -124,18 +112,14 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
             "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
-            # For memo only
-            "Current Assets": ca,
-            "Current Liabilities": cl,
-            "Total Liabilities": tl,
-            "Working Capital Num": wc,
-            "Current Ratio Num": current_ratio,
-            "Current Price Num": current_price,
-            "Price Ceiling Num": price_ceiling,
-            "Graham Number Num": graham_number,
-            "Graham Value Num": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
+            "Current Assets": est_current_assets,
+            "Current Liabilities": est_current_liabilities,
+            "Total Liabilities": est_total_liabilities,
+            "Current Price Num": current_price,
+            "Graham Number Num": graham_number,
+            "Graham Value Num": graham_value,
         }
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
@@ -189,7 +173,7 @@ if st.button("🚀 Run Screener"):
 
             # ======= DISPLAY TABLE =======
             table_cols = [
-                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA − TL > 0", "Pays Dividends",
+                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0", "Pays Dividends",
                 "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B", "Passed Count",
                 "Graham Number", "Graham Value"
             ]
@@ -204,12 +188,29 @@ if st.button("🚀 Run Screener"):
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
 
-                    ca, cl, tl = r["Current Assets"], r["Current Liabilities"], r["Total Liabilities"]
-                    wc, cr = r["Working Capital Num"], r["Current Ratio Num"]
+                    # Extract numeric values for notes
+                    ca = r["Current Assets"]
+                    cl = r["Current Liabilities"]
+                    tl = r["Total Liabilities"]
                     current_price = r["Current Price Num"]
-                    gn_val, gv_val = r["Graham Number Num"], r["Graham Value Num"]
+                    gn_val = r["Graham Number Num"]
+                    gv_val = r["Graham Value Num"]
+                    current_ratio = float(r["Current Ratio > 2"].split()[0])
 
-                    # ======= STRENGTH NOTE (Corrected) =======
+                    # ======= VALUATION INSIGHT =======
+                    if gn_val and gv_val and current_price > gn_val and current_price > gv_val:
+                        valuation_insight = "potentially overvalued as price above Graham Number and Graham Value"
+                    elif gn_val and gv_val and current_price < gn_val and current_price < gv_val:
+                        valuation_insight = "potentially undervalued as price below Graham Number and Graham Value"
+                    elif gn_val and gv_val and current_price > gn_val and current_price < gv_val:
+                        valuation_insight = "mixed valuation as price is above Graham Number but below Graham Value"
+                    elif gn_val and gv_val and current_price < gn_val and current_price > gv_val:
+                        valuation_insight = "mixed valuation as price is below Graham Number but above Graham Value"
+                    else:
+                        valuation_insight = "valuation metrics unavailable"
+
+                    # ======= STRENGTH NOTE =======
+                    wc = ca - cl
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
                     elif wc > 0:
@@ -217,38 +218,28 @@ if st.button("🚀 Run Screener"):
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
 
-                    # ======= VALUATION INSIGHT =======
-                    if gn_val and gv_val:
-                        if current_price > gn_val and current_price > gv_val:
-                            valuation_insight = "potentially overvalued as price above Graham Number and Graham Value."
-                        elif current_price < gn_val and current_price < gv_val:
-                            valuation_insight = "potentially undervalued as price below Graham Number and Graham Value."
-                        elif current_price > gn_val and current_price < gv_val:
-                            valuation_insight = "mixed valuation: price above Graham Number but below Graham Value."
-                        else:
-                            valuation_insight = "mixed valuation: price below Graham Number but above Graham Value."
-                    else:
-                        valuation_insight = "valuation data incomplete."
-
                     # ======= RISK NOTE =======
                     risk_components = []
                     if not r["Revenue > $100M"].endswith("✅"):
                         risk_components.append("Revenue below $100M; may indicate small scale or growth risk.")
-                    if not r["Current Ratio > 2"].endswith("✅"):
+                    if current_ratio < 2:
                         risk_components.append("Current Ratio low; liquidity may be a concern.")
-                    if not r["CA − TL > 0"].endswith("✅"):
+                    if ca <= tl:
                         risk_components.append("Current Assets do not cover total debt; liquidity risk.")
                     if not r["Price ≤ 15x3Y Avg EPS"].endswith("✅"):
                         risk_components.append("Price exceeds 15x 3-year EPS; stock may be overvalued.")
                     if not r["P/B"].endswith("✅"):
                         risk_components.append("Price-to-Book ratio high; stock may be overvalued relative to net assets.")
+
                     risk_note = "Potential risks: " + "; ".join(risk_components) + ". Consider market conditions." if risk_components else "No major risks identified."
 
+                    # ======= NEWS =======
                     news_text = fetch_news(r["Ticker"])
 
+                    # ======= DISPLAY MEMO =======
                     st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
                                 f"**Industry Note:** {industry_note}\n\n"
-                                f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}\n\n"
+                                f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
                                 f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
