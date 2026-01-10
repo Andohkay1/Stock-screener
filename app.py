@@ -14,72 +14,17 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# Full industry dictionary
-industry_notes = {
-    # Technology
-    "Consumer Electronics": "Companies designing and selling consumer electronic devices, facing high competition and frequent product launches.",
-    "Software—Infrastructure": "Companies providing essential software platforms for business operations, often with recurring subscription revenue.",
-    "Semiconductors": "Firms designing and manufacturing semiconductor chips, critical to electronics, subject to cyclical demand.",
-    "Internet Content & Information": "Companies providing online content, platforms, and digital advertising services.",
-    
-    # Healthcare
-    "Biotechnology": "Firms developing drugs and therapies, revenue depends on clinical success and regulatory approvals.",
-    "Healthcare Plans": "Companies managing health insurance plans, exposed to regulatory changes and medical cost trends.",
-    "Medical Devices": "Firms producing medical equipment and devices, relying on innovation and healthcare demand.",
-    
-    # Financials
-    "Banks—Regional": "Regional banks serving local markets, earning from loans and fees, sensitive to interest rates and credit quality.",
-    "Banks—Diversified": "Larger banks offering a wide range of financial services across multiple markets.",
-    "Insurance—Life": "Companies providing life insurance, subject to actuarial risk and investment performance.",
-    "Insurance—Property & Casualty": "Firms providing general insurance, exposed to claims volatility and catastrophe risks.",
-    
-    # Industrials
-    "Industrial Conglomerates": "Companies with diversified industrial operations, exposed to global economic cycles.",
-    "Steel": "Firms producing steel and related products, sensitive to commodity prices and industrial demand.",
-    "Construction & Engineering": "Companies engaged in infrastructure, commercial, and residential construction projects.",
-    "Aerospace & Defense": "Firms manufacturing aircraft, defense systems, and related products, often dependent on government contracts.",
-    
-    # Consumer
-    "Apparel Manufacturing": "Companies designing and producing clothing and footwear, sensitive to fashion trends and consumer demand.",
-    "Restaurants": "Foodservice companies operating dining establishments, sensitive to consumer spending and operating costs.",
-    "Food—Major Diversified": "Large food and beverage producers, often with global distribution and brand recognition.",
-    
-    # Energy
-    "Oil & Gas Integrated": "Companies involved in exploration, production, and refining of oil and gas, exposed to commodity price volatility.",
-    "Oil & Gas E&P": "Exploration and production firms, revenue depends on oil and gas reserves and prices.",
-    "Renewable Energy": "Companies producing or developing renewable energy sources, subject to regulatory support and technology adoption.",
-    
-    # Materials
-    "Chemicals—Specialty": "Companies producing specialty chemicals for industrial and consumer applications.",
-    "Paper & Forest Products": "Firms manufacturing paper, packaging, and related products.",
-    "Construction Materials": "Producers of cement, aggregates, and other building materials.",
-    
-    # Utilities
-    "Electric Utilities": "Companies generating, transmitting, and distributing electricity to consumers and businesses.",
-    "Water Utilities": "Firms managing water supply and wastewater treatment services.",
-    
-    # Communications
-    "Telecom Services": "Providers of wireless, wired, and broadband communication services, subject to regulatory and competitive pressures.",
-    "Media": "Companies operating broadcast, cable, or digital media services.",
-    
-    # Real Estate
-    "REIT—Retail": "Real estate investment trusts focusing on retail properties, sensitive to consumer trends and vacancy rates.",
-    "REIT—Industrial": "REITs focusing on industrial and logistics properties, often benefiting from e-commerce growth.",
-    "REIT—Residential": "REITs owning apartment and residential complexes, sensitive to housing demand and rental rates.",
-    
-    # Misc
-    "Diversified Operations": "Companies with multiple lines of business across industries, exposed to multiple market dynamics.",
-}
-
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
-        inc = stock.income_stmt if not inc.empty else pd.DataFrame()
+        inc = stock.financials if not stock.financials.empty else pd.DataFrame()  # fixed reference
+
         col = bs.columns[0] if not bs.empty else None
 
+        # Estimate current assets and total liabilities
         est_current_assets, est_total_liabilities = 0, 0
         if col:
             if "Total Current Assets" in bs.index:
@@ -92,6 +37,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                 "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
             ])
 
+        # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -117,51 +63,65 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
+        # Financial ratios
         current_ratio = info.get("currentRatio", 0)
         revenue = info.get("totalRevenue", 0)
-        pb_ratio = info.get("priceToBook", 0)
+        price_to_book = info.get("priceToBook", 0)
         current_price = info.get("currentPrice", 0)
         dividend_rate = info.get("dividendRate", 0)
-        industry = info.get("industry", "Diversified Operations")
-        industry_note = industry_notes.get(industry, "Industry information not available.")
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
+        # Screening criteria
         criteria = {
-            "Revenue > $100M": revenue > 100_000_000,
-            "Current Ratio > 2": current_ratio > 2,
-            "Estimated Current Assets - Liabilities > 0": est_current_assets > est_total_liabilities,
-            "Pays Dividends": dividend_rate > 0,
-            "Positive EPS for 5 Years": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
-            "Price ≤ 15 x 3Y Avg EPS": current_price <= price_ceiling,
-            "Price to Book Ratio < 1.5": pb_ratio < 1.5,
+            "Revenue above 100 million": revenue > 100_000_000,
+            "Current ratio above 2": current_ratio > 2,
+            "Current assets exceed liabilities": est_current_assets > est_total_liabilities,
+            "Pays dividends": dividend_rate > 0,
+            "Positive earnings per share for 5 years": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
+            "Price under 15 times 3-year average EPS": current_price <= price_ceiling,
+            "Price to book ratio under 1.5": price_to_book < 1.5,
         }
 
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
-        # Create investment memo
-        valuation_status = "overvalued" if current_price > graham_value or current_price > graham_number else "fairly valued or undervalued"
-        memo = f"""
-**Business Description:** {info.get('longBusinessSummary', 'No summary available.')}
-**Valuation Insight:** The stock is currently {valuation_status}. Current price (${current_price:.2f}) vs Graham Number (${graham_number:.2f}) and Graham Value (${graham_value:.2f}).
-**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends of ${dividend_rate:.2f}.
-**Screening Rationale:** Passed {passed} of 7 Akab screening criteria.
-**Risk Note:** Key considerations include valuation sensitivity and liquidity constraints.
-**Industry Note:** {industry_note}
-"""
+        # Industry description mapping
+        industries = {
+            "Technology": "operates in the technology sector, producing software, hardware, and related services.",
+            "Healthcare": "operates in healthcare, including pharmaceuticals, biotechnology, and medical devices.",
+            "Financial Services": "operates in financial services, including banking, insurance, and investment management.",
+            "Consumer Cyclical": "operates in consumer goods and retail sectors, selling non-essential products.",
+            "Consumer Defensive": "operates in consumer staples, producing essential goods like food, beverages, and household items.",
+            "Energy": "operates in energy, including oil, gas, and renewable energy production.",
+            "Industrials": "operates in industrials, including manufacturing, construction, and infrastructure-related businesses.",
+            "Materials": "operates in materials, including metals, chemicals, and paper products.",
+            "Utilities": "operates in utilities, providing electricity, gas, and water services.",
+            "Real Estate": "operates in real estate, including property development, management, and investment."
+        }
+
+        industry_note = industries.get(info.get("sector", ""), f"Operates in {info.get('sector', 'its sector')} sector.")
+
         return {
             "Ticker": ticker,
-            "Current Price": f"${current_price:.2f}" if current_price else "N/A",
+            "Price": f"${current_price:.2f}" if current_price else "N/A",
+            "Revenue above 100 million": f"{revenue:,} {mark(criteria['Revenue above 100 million'])}",
+            "Current ratio above 2": f"{current_ratio:.2f} {mark(criteria['Current ratio above 2'])}",
+            "Current assets exceed liabilities": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['Current assets exceed liabilities'])}",
+            "Pays dividends": f"{dividend_rate:.2f} {mark(criteria['Pays dividends'])}" if dividend_rate else f"0.00 ❌",
+            "Positive earnings per share for 5 years": f"{'Yes' if criteria['Positive earnings per share for 5 years'] else 'No'} {mark(criteria['Positive earnings per share for 5 years'])}",
+            "Price under 15 times 3-year average EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price under 15 times 3-year average EPS'])}" if current_price and price_ceiling else f"N/A ❌",
+            "Price to book ratio under 1.5": f"{price_to_book:.2f} {mark(criteria['Price to book ratio under 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f}" if not np.isnan(graham_number) else "N/A",
-            "Graham Value": f"${graham_value:.2f}" if not np.isnan(graham_value) else "N/A",
-            "Investment Memo": memo
+            "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
+            "Industry Note": industry_note
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
+# Tickers input
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -174,6 +134,7 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
+# Run Screener
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
@@ -182,7 +143,7 @@ if st.button("🚀 Run Screener"):
             results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
-                time.sleep(1.5)
+                time.sleep(1.5)  # Delay to avoid rate limiting
                 data = fetch_financials(t)
                 if data:
                     results.append(data)
@@ -192,10 +153,28 @@ if st.button("🚀 Run Screener"):
             df = pd.DataFrame(results)
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-            st.dataframe(df_sorted[["Ticker","Current Price","Passed Count","Graham Number","Graham Value"]])
+            st.dataframe(df_sorted)
 
+            # Investment memo
             st.markdown("### Investment Memos")
-            for memo in df_sorted["Investment Memo"]:
-                st.markdown(memo)
+            for r in results:
+                st.markdown(f"**{r['Ticker']}**")
+                st.markdown(f"**Industry Note:** {r['Industry Note']}")
+                st.markdown(f"**Valuation Insight:** The stock is trading at ${r['Price']} vs Graham Number {r['Graham Number']} and Graham Value {r['Graham Value']}. This indicates potential overvaluation or undervaluation depending on the difference.")
+                st.markdown(f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends." if "Pays dividends" in r else "")
+                st.markdown(f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.")
+                st.markdown(f"**Risk Note:** Consider valuation sensitivity, liquidity constraints, and market conditions.")
+
+            # Download results
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df_sorted.to_excel(writer, index=False)
+
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=output.getvalue(),
+                file_name="akab_screening_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
         else:
             st.warning("No valid data returned.")
