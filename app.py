@@ -6,9 +6,9 @@ import io
 import time
 import requests
 
-# Your Finhub API key
-FINHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
-
+# ----------------------------
+# CONFIG
+# ----------------------------
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
@@ -18,25 +18,30 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# ----------------------------
-# Helper functions
-# ----------------------------
-def fetch_news(ticker):
-    try:
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-01-09&token={FINHUB_API_KEY}"
-        r = requests.get(url)
-        data = r.json()
-        headlines = [d.get("headline") for d in data[:3]] if isinstance(data, list) else []
-        return " | ".join(headlines) if headlines else "No recent news available."
-    except Exception:
-        return "No recent news available."
+FINHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
 
+# ----------------------------
+# UTILITIES
+# ----------------------------
 def parse_money(value):
     try:
-        return float(str(value).replace("$","").replace(",",""))
+        return float(str(value).replace("$", "").replace(",", ""))
     except:
         return None
 
+def fetch_news(ticker):
+    try:
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-01-09&token={FINHUB_API_KEY}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        headlines = [d.get("headline") for d in data[:3]] if isinstance(data, list) else []
+        return " | ".join(headlines) if headlines else "No recent news available."
+    except:
+        return "No recent news available."
+
+# ----------------------------
+# FETCH FINANCIALS
+# ----------------------------
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
@@ -44,12 +49,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
+
         col = bs.columns[0] if not bs.empty else None
 
         est_current_assets, est_total_liabilities = 0, 0
         if col:
-            est_current_assets = bs.loc["Total Current Assets", col] if "Total Current Assets" in bs.index else sum(bs.loc[key, col] if key in bs.index else 0 for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"])
-            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"])
+            est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
+            ])
+            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
+            ])
 
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
@@ -73,8 +83,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                     eps_growth = (latest - oldest) / oldest
 
         bvps = info.get("bookValue", 0)
-        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
-        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
+        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
+        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
         current_ratio = info.get("currentRatio", 0)
         revenue = info.get("totalRevenue", 0)
@@ -99,19 +109,19 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         return {
             "Ticker": ticker,
             "Company Name": info.get("shortName", ticker),
+            "Sector": info.get("sector", "N/A"),
             "Current Price Num": current_price,
-            "Price": f"${current_price:.2f}" if current_price else "N/A",
-            "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
-            "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "CA - L > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
+            "Current Price": f"${current_price:.2f}" if current_price else "N/A",
+            "Graham Number": f"${graham_number:.2f} {mark(current_price > graham_number)}" if gn := graham_number else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(current_price > graham_value)}" if gv := graham_value else "N/A",
+            "Revenue": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
+            "Current Ratio": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
+            "CA - L": f"{est_current_assets - est_total_liabilities:,.0f} {mark(criteria['CA - L > 0'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5 Years": f"{'Yes' if criteria['Positive EPS for 5 Years'] else 'No'} {mark(criteria['Positive EPS for 5 Years'])}",
             "Price ≤ 15 x 3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15 x 3Y Avg EPS'])}" if current_price and price_ceiling else f"N/A ❌",
-            "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
+            "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
-            "Sector": info.get("sector", "Unknown"),
             "News": fetch_news(ticker)
         }
 
@@ -120,7 +130,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         return None
 
 # ----------------------------
-# Inputs
+# TICKER INPUT
 # ----------------------------
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
@@ -135,7 +145,7 @@ if uploaded_file is not None:
 tickers = list(set([t for t in tickers if t]))
 
 # ----------------------------
-# Run Screener
+# RUN SCREEN
 # ----------------------------
 if st.button("🚀 Run Screener"):
     if not tickers:
@@ -145,22 +155,19 @@ if st.button("🚀 Run Screener"):
             results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
-                time.sleep(1.5)
+                time.sleep(1.5)  # Rate limiting
                 data = fetch_financials(t)
                 if data:
                     results.append(data)
                 progress.progress((idx + 1) / len(tickers))
 
         if results:
-            df = pd.DataFrame(results)
-            # Move Graham metrics to the last columns
-            cols_order = [c for c in df.columns if c not in ["Graham Number", "Graham Value"]] + ["Graham Number", "Graham Value"]
-            df_sorted = df[cols_order].sort_values("Passed Count", ascending=False)
+            df_sorted = pd.DataFrame(results).sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
             st.dataframe(df_sorted)
 
             # ----------------------------
-            # Investment Memo
+            # INVESTMENT MEMO
             # ----------------------------
             st.markdown("### Investment Memos")
             for idx, r in df_sorted.iterrows():
@@ -168,15 +175,20 @@ if st.button("🚀 Run Screener"):
                     price = r["Current Price Num"]
                     gn = parse_money(r["Graham Number"])
                     gv = parse_money(r["Graham Value"])
-                    gn_text = f"above its Graham Number (${gn:.2f})" if price > gn else f"below its Graham Number (${gn:.2f})"
-                    gv_text = f"and above its Graham Value (${gv:.2f})" if price > gv else f"and below its Graham Value (${gv:.2f})"
+
+                    if gn is None or gv is None:
+                        valuation_text = f"{r['Company Name']} is trading at ${price:.2f}. Graham metrics not available."
+                    else:
+                        gn_text = f"above its Graham Number (${gn:.2f})" if price > gn else f"below its Graham Number (${gn:.2f})"
+                        gv_text = f"and above its Graham Value (${gv:.2f})" if price > gv else f"and below its Graham Value (${gv:.2f})"
+                        valuation_text = f"{r['Company Name']} is trading at ${price:.2f}, {gn_text} {gv_text}, potentially overvalued ❌."
 
                     st.markdown(f"""
 **{r['Company Name']} ({r['Ticker']})**
 
 **Industry Note:** Operates in the {r['Sector']} sector.
 
-**Valuation Insight:** {r['Company Name']} is trading at ${price:.2f}, {gn_text} {gv_text}, potentially overvalued ❌.
+**Valuation Insight:** {valuation_text}
 
 **Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.
 
@@ -192,12 +204,11 @@ if st.button("🚀 Run Screener"):
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
 
             # ----------------------------
-            # Download
+            # DOWNLOAD EXCEL
             # ----------------------------
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                 df_sorted.to_excel(writer, index=False)
-
             st.download_button(
                 label="📥 Download Results as Excel",
                 data=output.getvalue(),
