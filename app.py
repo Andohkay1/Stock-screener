@@ -203,7 +203,7 @@ if st.button("🚀 Run Screener"):
                                 f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** Consider valuation sensitivity, and market conditions.\n\n"
+                                f"**Risk Note:** Consider valuation sensitivity and market conditions.\n\n"
                                 f"**Recent News:** {news_text}\n")
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
