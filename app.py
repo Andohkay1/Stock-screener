@@ -56,12 +56,10 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                     total += 0
             return total
 
-        ca = safe_sum(ca_keys) if col else 0
-        cl = safe_sum(cl_keys) if col else 0
-        tl = safe_sum(tl_keys) if col else 0
-
+        ca = float(safe_sum(ca_keys) if col else 0)
+        cl = float(safe_sum(cl_keys) if col else 0)
+        tl = float(safe_sum(tl_keys) if col else 0)
         wc = ca - cl
-        ca_vs_tl_flag = ca > tl
 
         # EPS calculations
         eps_values = []
@@ -97,6 +95,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         current_price = info.get("currentPrice", 0) or 0
         dividend_rate = info.get("dividendRate", 0) or 0
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
+
+        ca_vs_tl_flag = ca > tl
 
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
@@ -209,6 +209,11 @@ if st.button("🚀 Run Screener"):
                     gv_val = r["Graham Value Num"]
                     price_ceiling_num = r.get("Price Ceiling Num", 0)
                     pb_ratio = float(r["P/B"].split()[0])
+                    wc = r.get("Working Capital Num", 0)
+                    ca = r.get("Current Assets", 0)
+                    cl = r.get("Current Liabilities", 0)
+                    tl = r.get("Total Liabilities", 0)
+                    current_ratio_num = r.get("Current Ratio Num", 0)
 
                     # ======= VALUATION INSIGHT =======
                     valuation_insight = (
@@ -222,23 +227,22 @@ if st.button("🚀 Run Screener"):
                     )
 
                     # ======= STRENGTH NOTE =======
-                    ca = r.get("Current Assets", 0)
-                    cl = r.get("Current Liabilities", 0)
-                    tl = r.get("Total Liabilities", 0)
-                    wc = r.get("Working Capital Num", 0)
-                    current_ratio = r.get("Current Ratio Num", 0)
-
-                    # Logic for memo only
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
-                    elif ca < tl and wc > 0:
-                        strength_note = "Working capital positive, but Current Assets do not cover total debt."
+                    elif wc > 0:
+                        if current_ratio_num >= 1:
+                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity acceptable."
+                        else:
+                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity may be tight."
                     else:
-                        strength_note = "Working capital negative; liquidity may be tight."
+                        if current_ratio_num >= 1:
+                            strength_note = "Working capital negative; liquidity may be acceptable due to industry operations."
+                        else:
+                            strength_note = "Working capital negative; liquidity may be tight."
 
                     # ======= RISK NOTE =======
                     risk_items = []
-                    if current_ratio < 1:
+                    if current_ratio_num < 1:
                         risk_items.append("Liquidity is below safe threshold; may struggle to meet short-term obligations")
                     if price_ceiling_num and current_price > price_ceiling_num:
                         risk_items.append("Price exceeds 15x 3-year average EPS; stock may be overvalued")
