@@ -135,8 +135,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
+            "Graham Number": graham_number,
+            "Graham Value": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
@@ -220,10 +220,10 @@ if st.button("🚀 Run Screener"):
                     gn_val = r["Graham Number"]
                     gv_val = r["Graham Value"]
                     valuation_insight = (
-                        "potentially overvalued as price above Graham Number and Graham Value" if (gn_val and gv_val and current_price > float(gn_val.split()[0][1:]) and current_price > float(gv_val.split()[0][1:]))
-                        else "potentially undervalued as price below Graham Number and Graham Value" if (gn_val and gv_val and current_price < float(gn_val.split()[0][1:]) and current_price < float(gv_val.split()[0][1:]))
-                        else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > float(gn_val.split()[0][1:]) and current_price < float(gv_val.split()[0][1:]))
-                        else "mixed valuation as price is below Graham Number but above Graham Value"
+                        "potentially overvalued as price above Graham Number and Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
+                        else "potentially undervalued as price below Graham Number and Graham Value" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
+                        else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price < gv_val)
+                        else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
                     # ======= Strength Note =======
@@ -231,13 +231,20 @@ if st.button("🚀 Run Screener"):
                     cl = r.get("Current Liabilities", 0)
                     tl = r.get("Total Liabilities", 0)
                     wc = r.get("Working Capital", 0)
+                    current_ratio = r.get("Current Ratio Num", 0)
 
-                    if ca > tl:
+                    if ca > tl and current_ratio >= 1:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
                     elif wc >= 0:
-                        strength_note = "Working capital positive; Current Assets do not cover total debt."
+                        if current_ratio >= 1:
+                            strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity acceptable."
+                        else:
+                            strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity may be tight."
                     else:
-                        strength_note = "Working capital negative; liquidity may be tight."
+                        if current_ratio >= 1:
+                            strength_note = "Working capital negative; liquidity may be acceptable due to industry operations."
+                        else:
+                            strength_note = "Working capital negative; liquidity may be tight."
 
                     # ======= Dynamic Descriptive Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
