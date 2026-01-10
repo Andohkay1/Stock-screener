@@ -53,7 +53,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
         ]) if col else 0
 
-        # Ensure numeric
         est_current_assets = float(est_current_assets) if est_current_assets is not None else 0
         est_total_liabilities = float(est_total_liabilities) if est_total_liabilities is not None else 0
 
@@ -194,7 +193,10 @@ if st.button("🚀 Run Screener"):
                     industry = r["Industry"]
                     long_summary = r.get("Long Summary", "")
                     if long_summary:
-                        company_products = long_summary.split(".")[0]
+                        # Remove company name from start and take first 2 sentences
+                        description = long_summary.replace(company_name, "").strip()
+                        sentences = [s.strip() for s in description.split(".") if s.strip()]
+                        company_products = ". ".join(sentences[:2])
                         industry_note = f"{company_name} operates in the {industry} sector. Key products/services: {company_products}."
                     else:
                         products = industry_products.get(industry, None)
