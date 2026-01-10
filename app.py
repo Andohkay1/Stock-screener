@@ -35,7 +35,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         stock = yf.Ticker(ticker)
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
-        inc = stock.income_stmt if not inc.empty else pd.DataFrame()
+        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
         # Current Assets estimate
@@ -199,7 +199,7 @@ if st.button("🚀 Run Screener"):
                         else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
-                    # Strength Note (bulletproof)
+                    # Strength Note (dynamic)
                     current_assets = r["Current Assets"] or 0
                     current_liabilities = r["Current Liabilities"] or 0
                     total_liabilities = r["Total Liabilities"] or 0
