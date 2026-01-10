@@ -192,7 +192,7 @@ if st.button("🚀 Run Screener"):
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
 
-                    valuation_insight = "potentially overvalued" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val) else "potentially undervalued"
+                    valuation_insight = "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val) else "potentially undervalued as price below graham value and number"
 
                     strength_note = "Current Assets pay all Total Liabilities."
                     news_text = fetch_news(r["Ticker"])
@@ -203,7 +203,7 @@ if st.button("🚀 Run Screener"):
                                 f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** Consider valuation sensitivity, liquidity constraints, and market conditions.\n\n"
+                                f"**Risk Note:** Consider valuation sensitivity, and market conditions.\n\n"
                                 f"**Recent News:** {news_text}\n")
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
