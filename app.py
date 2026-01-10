@@ -192,29 +192,6 @@ if st.button("🚀 Run Screener"):
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
 
-if gn_val is not None and gv_val is not None:
-    if current_price > gn_val and current_price > gv_val:
-        valuation_insight = (
-            "potentially overvalued as price is above both the Graham Number and Graham Value"
-        )
-
-    elif current_price < gn_val and current_price < gv_val:
-        valuation_insight = (
-            "potentially undervalued as price is below both the Graham Number and Graham Value"
-        )
-
-    elif current_price > gn_val and current_price < gv_val:
-        valuation_insight = (
-            "mixed valuation: price is above the Graham Number but below the Graham Value"
-        )
-
-    elif current_price < gn_val and current_price > gv_val:
-        valuation_insight = (
-            "mixed valuation: price is below the Graham Number but above the Graham Value"
-        )
-
-else:
-    valuation_insight = "Graham valuation metrics not available"
 
                     strength_note = "Current Assets pay all Total Liabilities."
                     news_text = fetch_news(r["Ticker"])
