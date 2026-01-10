@@ -239,7 +239,7 @@ if st.button("🚀 Run Screener"):
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt"
                     elif wc >= 0 and cr >= 1 and ca <= tl:
-    risk_note = "Working capital positive, but Current Assets do not cover total liabilities; leverage risk remains."
+                    risk_note = "Working capital positive, but Current Assets do not cover total liabilities; leverage risk remains."
 
                     # ======= Dynamic Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
