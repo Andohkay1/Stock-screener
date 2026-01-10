@@ -209,19 +209,13 @@ if st.button("🚀 Run Screener"):
                     current_price = r["Current Price Num"]
                     gn_val, gv_val = r["Graham Number Num"], r["Graham Value Num"]
 
-                    # ======= STRENGTH NOTE =======
+                    # ======= STRENGTH NOTE (Corrected) =======
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
                     elif wc > 0:
-                        if cr >= 1:
-                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity acceptable."
-                        else:
-                            strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity may be tight."
+                        strength_note = "Working capital positive, but Current Assets do not cover total debt; liquidity acceptable."
                     else:
-                        if cr >= 1:
-                            strength_note = "Working capital negative; liquidity may be acceptable due to industry operations."
-                        else:
-                            strength_note = "Working capital negative; liquidity may be tight."
+                        strength_note = "Working capital negative; liquidity may be tight."
 
                     # ======= VALUATION INSIGHT =======
                     if gn_val and gv_val:
