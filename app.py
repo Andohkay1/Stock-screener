@@ -2,48 +2,24 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import requests
 import io
 import time
+import openai
 
-# -----------------------------
-# Finnhub API Setup
-# -----------------------------
-FINNHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"  # Your API key
-FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/company-news"
-
-def fetch_company_news(ticker, last_days=30):
-    try:
-        import datetime
-        today = datetime.date.today()
-        start_date = today - datetime.timedelta(days=last_days)
-        url = f"{FINNHUB_NEWS_URL}?symbol={ticker}&from={start_date}&to={today}&token={FINNHUB_API_KEY}"
-        response = requests.get(url)
-        data = response.json()
-        headlines = []
-        for item in data[:2]:  # top 2 headlines
-            title = item.get("headline", "")
-            source = item.get("source", "")
-            if title:
-                headlines.append(f"{title} ({source})")
-        return headlines
-    except:
-        return []
-
-# -----------------------------
-# Streamlit UI Setup
-# -----------------------------
+# ---------------------- CONFIG ----------------------
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
     layout="centered"
 )
+
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# -----------------------------
-# Financial Fetcher
-# -----------------------------
+# ---------------------- OPENAI CONFIG ----------------------
+openai.api_key = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
+
+# ---------------------- FINANCIALS FUNCTION ----------------------
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
@@ -51,16 +27,21 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
+
         col = bs.columns[0] if not bs.empty else None
 
-        # Current assets and liabilities
         est_current_assets, est_total_liabilities = 0, 0
         if col:
-            est_current_assets = bs.loc["Total Current Assets", col] if "Total Current Assets" in bs.index else \
-                sum(bs.loc[key, col] if key in bs.index else 0 for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"])
-            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"])
+            if "Total Current Assets" in bs.index:
+                est_current_assets = bs.loc["Total Current Assets", col]
+            else:
+                est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                    "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
+                ])
+            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
+                "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
+            ])
 
-        # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -86,7 +67,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
-        # Key metrics
         current_ratio = info.get("currentRatio", 0)
         revenue = info.get("totalRevenue", 0)
         pb_ratio = info.get("priceToBook", 0)
@@ -94,7 +74,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # Screening criteria
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -108,47 +87,9 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
-        # -----------------------------
-        # Generate Investment Memo
-        # -----------------------------
-        memo_parts = []
-
-        # Business description
-        business_summary = info.get("longBusinessSummary", "Business summary unavailable.")
-        sector = info.get("sector", "Sector unavailable")
-        industry = info.get("industry", "Industry unavailable")
-        memo_parts.append(f"**Business Description:** {business_summary} Operates in the {industry} segment of the {sector} sector.")
-
-        # Valuation insight
-        val_text = "Valuation metrics are neutral."
-        if current_price and graham_value:
-            if current_price > graham_value:
-                val_text = f"The stock is currently trading above its Graham Number (${graham_number:.2f}) and Graham Value (${graham_value:.2f}), indicating potential overvaluation."
-            elif current_price < graham_value:
-                val_text = f"The stock is trading below its Graham benchmarks, suggesting potential undervaluation."
-        memo_parts.append(f"**Valuation Insight:** {val_text}")
-
-        # Financial strength
-        fin_text = f"Earnings consistently positive for last 5 years. {'Pays regular dividends.' if dividend_rate else 'No dividend payments.'}"
-        memo_parts.append(f"**Financial Strength:** {fin_text}")
-
-        # Screening rationale
-        memo_parts.append(f"**Screening Rationale:** Passed {passed} of 7 Akab screening criteria.")
-
-        # Risk note
-        risk_text = "Key considerations include valuation sensitivity, liquidity constraints."
-        memo_parts.append(f"**Risk Note:** {risk_text}")
-
-        # Recent news
-        news = fetch_company_news(ticker)
-        if news:
-            memo_parts.append(f"**Recent News:** {'; '.join(news)}")
-
-        memo_text = "\n\n".join(memo_parts)
-
         return {
             "Ticker": ticker,
-            "Price": f"${current_price:.2f}" if current_price else "N/A",
+            "Price": current_price,
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
             "Estimated CA - CL > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['Estimated Current Assets - Liabilities > 0'])}",
@@ -157,18 +98,44 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15 x 3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15 x 3Y Avg EPS'])}" if current_price and price_ceiling else f"N/A ❌",
             "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
-            "Investment Memo": memo_text
+            "Graham Number": graham_number,
+            "Graham Value": graham_value
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# -----------------------------
-# User Input
-# -----------------------------
+# ---------------------- INVESTMENT MEMO ----------------------
+def generate_memo(ticker, info, financials):
+    # Prepare prompt for GPT
+    memo_prompt = f"""
+Write an investment memo for {ticker}.
+Include:
+- Business Description (key products/services, sector)
+- Valuation Insight (include if current price {financials['Price']} is above or below Graham Number {financials['Graham Number']:.2f} and Graham Value {financials['Graham Value']:.2f})
+- Financial Strength (EPS trends, dividend)
+- Screening Rationale (passed {financials['Passed Count']} of 7 criteria)
+- Risk Note (valuation risk, liquidity, industry-specific risks)
+- Recent News Summary (from Yahoo Finance, summarize key points in plain language)
+Keep it concise and professional.
+"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role":"system","content":"You are a professional financial analyst."},
+                {"role":"user","content":memo_prompt}
+            ],
+            max_tokens=500,
+            temperature=0.5
+        )
+        memo_text = response['choices'][0]['message']['content']
+        return memo_text
+    except Exception as e:
+        return f"Error generating memo: {e}"
+
+# ---------------------- INPUT ----------------------
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -181,9 +148,7 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
-# -----------------------------
-# Run Screener
-# -----------------------------
+# ---------------------- RUN SCREEN ----------------------
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
@@ -202,16 +167,23 @@ if st.button("🚀 Run Screener"):
             df = pd.DataFrame(results)
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-            st.dataframe(df_sorted.drop(columns=["Investment Memo"]))
+            st.dataframe(df_sorted[['Ticker','Price','Revenue > $100M','Current Ratio > 2',
+                                     'Estimated CA - CL > 0','Pays Dividends','Positive EPS for 5 Years',
+                                     'Price ≤ 15 x 3Y Avg EPS','P/B < 1.5','Passed Count','Graham Number','Graham Value']])
 
-            st.markdown("### Investment Memos")
-            for item in results:
-                st.subheader(item['Ticker'])
-                st.markdown(item['Investment Memo'])
+            # ---------------------- INVESTMENT MEMOS ----------------------
+            st.markdown("## Investment Memos")
+            for idx, row in df_sorted.iterrows():
+                st.markdown(f"### {row['Ticker']}")
+                stock_info = yf.Ticker(row['Ticker']).info
+                memo = generate_memo(row['Ticker'], stock_info, row)
+                st.markdown(memo)
 
+            # ---------------------- DOWNLOAD ----------------------
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
                 df_sorted.to_excel(writer, index=False)
+
             st.download_button(
                 label="📥 Download Results as Excel",
                 data=output.getvalue(),
