@@ -19,12 +19,11 @@ def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
-        inc = stock.financials if not stock.financials.empty else pd.DataFrame()  # fixed reference
+        bs = stock.balance_sheet if hasattr(stock, 'balance_sheet') and not stock.balance_sheet.empty else pd.DataFrame()
+        inc = stock.income_stmt if hasattr(stock, 'income_stmt') and not stock.income_stmt.empty else pd.DataFrame()
 
         col = bs.columns[0] if not bs.empty else None
 
-        # Estimate current assets and total liabilities
         est_current_assets, est_total_liabilities = 0, 0
         if col:
             if "Total Current Assets" in bs.index:
@@ -37,7 +36,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                 "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
             ])
 
-        # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -63,65 +61,56 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
-        # Financial ratios
         current_ratio = info.get("currentRatio", 0)
         revenue = info.get("totalRevenue", 0)
-        price_to_book = info.get("priceToBook", 0)
+        pb_ratio = info.get("priceToBook", 0)
         current_price = info.get("currentPrice", 0)
         dividend_rate = info.get("dividendRate", 0)
+        industry = info.get("industry", "Unknown")
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # Screening criteria
         criteria = {
-            "Revenue above 100 million": revenue > 100_000_000,
-            "Current ratio above 2": current_ratio > 2,
-            "Current assets exceed liabilities": est_current_assets > est_total_liabilities,
-            "Pays dividends": dividend_rate > 0,
-            "Positive earnings per share for 5 years": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
-            "Price under 15 times 3-year average EPS": current_price <= price_ceiling,
-            "Price to book ratio under 1.5": price_to_book < 1.5,
+            "Revenue > $100M": revenue > 100_000_000,
+            "Current Ratio > 2": current_ratio > 2,
+            "Estimated Current Assets - Liabilities > 0": est_current_assets > est_total_liabilities,
+            "Pays Dividends": dividend_rate > 0,
+            "Positive EPS for 5 Years": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
+            "Price ≤ 15 x 3Y Avg EPS": current_price <= price_ceiling,
+            "P/B < 1.5": pb_ratio < 1.5,
         }
 
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
-        # Industry description mapping
-        industries = {
-            "Technology": "operates in the technology sector, producing software, hardware, and related services.",
-            "Healthcare": "operates in healthcare, including pharmaceuticals, biotechnology, and medical devices.",
-            "Financial Services": "operates in financial services, including banking, insurance, and investment management.",
-            "Consumer Cyclical": "operates in consumer goods and retail sectors, selling non-essential products.",
-            "Consumer Defensive": "operates in consumer staples, producing essential goods like food, beverages, and household items.",
-            "Energy": "operates in energy, including oil, gas, and renewable energy production.",
-            "Industrials": "operates in industrials, including manufacturing, construction, and infrastructure-related businesses.",
-            "Materials": "operates in materials, including metals, chemicals, and paper products.",
-            "Utilities": "operates in utilities, providing electricity, gas, and water services.",
-            "Real Estate": "operates in real estate, including property development, management, and investment."
-        }
-
-        industry_note = industries.get(info.get("sector", ""), f"Operates in {info.get('sector', 'its sector')} sector.")
+        # Recent news
+        try:
+            news_items = stock.news[:3]  # latest 3 news
+            news_str = "; ".join([f"{n['title']} ({n['publisher']})" for n in news_items])
+        except:
+            news_str = "No recent news available."
 
         return {
             "Ticker": ticker,
+            "Company Name": info.get("longName", ticker),
+            "Industry Note": f"Operates in the {industry} sector.",
             "Price": f"${current_price:.2f}" if current_price else "N/A",
-            "Revenue above 100 million": f"{revenue:,} {mark(criteria['Revenue above 100 million'])}",
-            "Current ratio above 2": f"{current_ratio:.2f} {mark(criteria['Current ratio above 2'])}",
-            "Current assets exceed liabilities": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['Current assets exceed liabilities'])}",
-            "Pays dividends": f"{dividend_rate:.2f} {mark(criteria['Pays dividends'])}" if dividend_rate else f"0.00 ❌",
-            "Positive earnings per share for 5 years": f"{'Yes' if criteria['Positive earnings per share for 5 years'] else 'No'} {mark(criteria['Positive earnings per share for 5 years'])}",
-            "Price under 15 times 3-year average EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price under 15 times 3-year average EPS'])}" if current_price and price_ceiling else f"N/A ❌",
-            "Price to book ratio under 1.5": f"{price_to_book:.2f} {mark(criteria['Price to book ratio under 1.5'])}",
+            "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
+            "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
+            "Estimated CA - CL > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['Estimated Current Assets - Liabilities > 0'])}",
+            "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
+            "Positive EPS for 5 Years": f"{'Yes' if criteria['Positive EPS for 5 Years'] else 'No'} {mark(criteria['Positive EPS for 5 Years'])}",
+            "Price ≤ 15 x 3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15 x 3Y Avg EPS'])}" if current_price and price_ceiling else f"N/A ❌",
+            "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
             "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
-            "Industry Note": industry_note
+            "Recent News": news_str
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# Tickers input
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -134,7 +123,6 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
-# Run Screener
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
@@ -155,15 +143,32 @@ if st.button("🚀 Run Screener"):
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
             st.dataframe(df_sorted)
 
-            # Investment memo
+            # Investment memo with improved logic
             st.markdown("### Investment Memos")
             for r in results:
-                st.markdown(f"**{r['Ticker']}**")
+                try:
+                    price_val = float(r["Price"].replace("$",""))
+                    graham_num_val = float(r["Graham Number"].split()[0].replace("$",""))
+                    graham_val_val = float(r["Graham Value"].split()[0].replace("$",""))
+                except:
+                    price_val, graham_num_val, graham_val_val = None, None, None
+
+                if price_val and graham_num_val and graham_val_val:
+                    if price_val < graham_num_val or price_val < graham_val_val:
+                        valuation_status = "potentially undervalued"
+                    else:
+                        valuation_status = "potentially overvalued"
+                else:
+                    valuation_status = "valuation data unavailable"
+
+                st.markdown(f"**{r['Company Name']} ({r['Ticker']})**")
                 st.markdown(f"**Industry Note:** {r['Industry Note']}")
-                st.markdown(f"**Valuation Insight:** The stock is trading at ${r['Price']} vs Graham Number {r['Graham Number']} and Graham Value {r['Graham Value']}. This indicates potential overvaluation or undervaluation depending on the difference.")
-                st.markdown(f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends." if "Pays dividends" in r else "")
+                st.markdown(f"**Valuation Insight:** {r['Company Name']} is trading at ${price_val:.2f}, compared to Graham Number ${graham_num_val:.2f} and Graham Value ${graham_val_val:.2f}, indicating it is {valuation_status}.")
+                st.markdown(f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends." if "Pays Dividends" in r else "")
                 st.markdown(f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.")
                 st.markdown(f"**Risk Note:** Consider valuation sensitivity, liquidity constraints, and market conditions.")
+                st.markdown(f"**Recent News:** {r['Recent News']}")
+                st.markdown("---")
 
             # Download results
             output = io.BytesIO()
