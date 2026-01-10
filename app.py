@@ -142,7 +142,9 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Current Assets": current_assets,
             "Current Liabilities": current_liabilities,
             "Total Liabilities": total_liabilities,
-            "Current Ratio Num": current_ratio,
+            "Current Price Num": current_price,
+            "Graham Number Num": graham_number,
+            "Graham Value Num": graham_value,
             "Working Capital": working_capital,
             "Failed Criteria": failed_criteria,
             "Criteria Risks": criteria_risks,
@@ -215,14 +217,17 @@ if st.button("🚀 Run Screener"):
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
 
-                    # Valuation insight
-                    current_price = r["Price"]
-                    gn_val = r["Graham Number"]
-                    gv_val = r["Graham Value"]
+                    # Valuation insight (using numeric fields)
+                    current_price_num = r["Current Price Num"]
+                    gn_val_num = r["Graham Number Num"]
+                    gv_val_num = r["Graham Value Num"]
                     valuation_insight = (
-                        "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
-                        else "potentially undervalued as price below graham value and number" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
-                        else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price < gv_val)
+                        "potentially overvalued as price above graham value and number" 
+                        if (gn_val_num and gv_val_num and current_price_num > gn_val_num and current_price_num > gv_val_num)
+                        else "potentially undervalued as price below graham value and number" 
+                        if (gn_val_num and gv_val_num and current_price_num < gn_val_num and current_price_num < gv_val_num)
+                        else "mixed valuation as price is above Graham Number but below Graham Value" 
+                        if (gn_val_num and gv_val_num and current_price_num > gn_val_num and current_price_num < gv_val_num)
                         else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
@@ -256,7 +261,7 @@ if st.button("🚀 Run Screener"):
 
                     st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
                                 f"**Industry Note:** {industry_note}\n\n"
-                                f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
+                                f"**Valuation Insight:** {company_name} is trading at ${current_price_num:.2f}, {valuation_insight}.\n\n"
                                 f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
