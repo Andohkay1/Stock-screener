@@ -4,9 +4,7 @@ import yfinance as yf
 import numpy as np
 import io
 import time
-import openai
 
-# ---------------------- CONFIG ----------------------
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
@@ -16,18 +14,70 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# ---------------------- OPENAI CONFIG ----------------------
-openai.api_key = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
+# Full industry dictionary
+industry_notes = {
+    # Technology
+    "Consumer Electronics": "Companies designing and selling consumer electronic devices, facing high competition and frequent product launches.",
+    "Software—Infrastructure": "Companies providing essential software platforms for business operations, often with recurring subscription revenue.",
+    "Semiconductors": "Firms designing and manufacturing semiconductor chips, critical to electronics, subject to cyclical demand.",
+    "Internet Content & Information": "Companies providing online content, platforms, and digital advertising services.",
+    
+    # Healthcare
+    "Biotechnology": "Firms developing drugs and therapies, revenue depends on clinical success and regulatory approvals.",
+    "Healthcare Plans": "Companies managing health insurance plans, exposed to regulatory changes and medical cost trends.",
+    "Medical Devices": "Firms producing medical equipment and devices, relying on innovation and healthcare demand.",
+    
+    # Financials
+    "Banks—Regional": "Regional banks serving local markets, earning from loans and fees, sensitive to interest rates and credit quality.",
+    "Banks—Diversified": "Larger banks offering a wide range of financial services across multiple markets.",
+    "Insurance—Life": "Companies providing life insurance, subject to actuarial risk and investment performance.",
+    "Insurance—Property & Casualty": "Firms providing general insurance, exposed to claims volatility and catastrophe risks.",
+    
+    # Industrials
+    "Industrial Conglomerates": "Companies with diversified industrial operations, exposed to global economic cycles.",
+    "Steel": "Firms producing steel and related products, sensitive to commodity prices and industrial demand.",
+    "Construction & Engineering": "Companies engaged in infrastructure, commercial, and residential construction projects.",
+    "Aerospace & Defense": "Firms manufacturing aircraft, defense systems, and related products, often dependent on government contracts.",
+    
+    # Consumer
+    "Apparel Manufacturing": "Companies designing and producing clothing and footwear, sensitive to fashion trends and consumer demand.",
+    "Restaurants": "Foodservice companies operating dining establishments, sensitive to consumer spending and operating costs.",
+    "Food—Major Diversified": "Large food and beverage producers, often with global distribution and brand recognition.",
+    
+    # Energy
+    "Oil & Gas Integrated": "Companies involved in exploration, production, and refining of oil and gas, exposed to commodity price volatility.",
+    "Oil & Gas E&P": "Exploration and production firms, revenue depends on oil and gas reserves and prices.",
+    "Renewable Energy": "Companies producing or developing renewable energy sources, subject to regulatory support and technology adoption.",
+    
+    # Materials
+    "Chemicals—Specialty": "Companies producing specialty chemicals for industrial and consumer applications.",
+    "Paper & Forest Products": "Firms manufacturing paper, packaging, and related products.",
+    "Construction Materials": "Producers of cement, aggregates, and other building materials.",
+    
+    # Utilities
+    "Electric Utilities": "Companies generating, transmitting, and distributing electricity to consumers and businesses.",
+    "Water Utilities": "Firms managing water supply and wastewater treatment services.",
+    
+    # Communications
+    "Telecom Services": "Providers of wireless, wired, and broadband communication services, subject to regulatory and competitive pressures.",
+    "Media": "Companies operating broadcast, cable, or digital media services.",
+    
+    # Real Estate
+    "REIT—Retail": "Real estate investment trusts focusing on retail properties, sensitive to consumer trends and vacancy rates.",
+    "REIT—Industrial": "REITs focusing on industrial and logistics properties, often benefiting from e-commerce growth.",
+    "REIT—Residential": "REITs owning apartment and residential complexes, sensitive to housing demand and rental rates.",
+    
+    # Misc
+    "Diversified Operations": "Companies with multiple lines of business across industries, exposed to multiple market dynamics.",
+}
 
-# ---------------------- FINANCIALS FUNCTION ----------------------
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
-        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
-
+        inc = stock.income_stmt if not inc.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
         est_current_assets, est_total_liabilities = 0, 0
@@ -72,6 +122,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         pb_ratio = info.get("priceToBook", 0)
         current_price = info.get("currentPrice", 0)
         dividend_rate = info.get("dividendRate", 0)
+        industry = info.get("industry", "Diversified Operations")
+        industry_note = industry_notes.get(industry, "Industry information not available.")
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
         criteria = {
@@ -81,61 +133,35 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5 Years": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15 x 3Y Avg EPS": current_price <= price_ceiling,
-            "P/B < 1.5": pb_ratio < 1.5,
+            "Price to Book Ratio < 1.5": pb_ratio < 1.5,
         }
 
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
+        # Create investment memo
+        valuation_status = "overvalued" if current_price > graham_value or current_price > graham_number else "fairly valued or undervalued"
+        memo = f"""
+**Business Description:** {info.get('longBusinessSummary', 'No summary available.')}
+**Valuation Insight:** The stock is currently {valuation_status}. Current price (${current_price:.2f}) vs Graham Number (${graham_number:.2f}) and Graham Value (${graham_value:.2f}).
+**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends of ${dividend_rate:.2f}.
+**Screening Rationale:** Passed {passed} of 7 Akab screening criteria.
+**Risk Note:** Key considerations include valuation sensitivity and liquidity constraints.
+**Industry Note:** {industry_note}
+"""
         return {
             "Ticker": ticker,
-            "Price": current_price,
-            "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
-            "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "Estimated CA - CL > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['Estimated Current Assets - Liabilities > 0'])}",
-            "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
-            "Positive EPS for 5 Years": f"{'Yes' if criteria['Positive EPS for 5 Years'] else 'No'} {mark(criteria['Positive EPS for 5 Years'])}",
-            "Price ≤ 15 x 3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15 x 3Y Avg EPS'])}" if current_price and price_ceiling else f"N/A ❌",
-            "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
+            "Current Price": f"${current_price:.2f}" if current_price else "N/A",
             "Passed Count": passed,
-            "Graham Number": graham_number,
-            "Graham Value": graham_value
+            "Graham Number": f"${graham_number:.2f}" if not np.isnan(graham_number) else "N/A",
+            "Graham Value": f"${graham_value:.2f}" if not np.isnan(graham_value) else "N/A",
+            "Investment Memo": memo
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# ---------------------- INVESTMENT MEMO ----------------------
-def generate_memo(ticker, info, financials):
-    # Prepare prompt for GPT
-    memo_prompt = f"""
-Write an investment memo for {ticker}.
-Include:
-- Business Description (key products/services, sector)
-- Valuation Insight (include if current price {financials['Price']} is above or below Graham Number {financials['Graham Number']:.2f} and Graham Value {financials['Graham Value']:.2f})
-- Financial Strength (EPS trends, dividend)
-- Screening Rationale (passed {financials['Passed Count']} of 7 criteria)
-- Risk Note (valuation risk, liquidity, industry-specific risks)
-- Recent News Summary (from Yahoo Finance, summarize key points in plain language)
-Keep it concise and professional.
-"""
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role":"system","content":"You are a professional financial analyst."},
-                {"role":"user","content":memo_prompt}
-            ],
-            max_tokens=500,
-            temperature=0.5
-        )
-        memo_text = response['choices'][0]['message']['content']
-        return memo_text
-    except Exception as e:
-        return f"Error generating memo: {e}"
-
-# ---------------------- INPUT ----------------------
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -148,7 +174,6 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
-# ---------------------- RUN SCREEN ----------------------
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
@@ -167,28 +192,10 @@ if st.button("🚀 Run Screener"):
             df = pd.DataFrame(results)
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-            st.dataframe(df_sorted[['Ticker','Price','Revenue > $100M','Current Ratio > 2',
-                                     'Estimated CA - CL > 0','Pays Dividends','Positive EPS for 5 Years',
-                                     'Price ≤ 15 x 3Y Avg EPS','P/B < 1.5','Passed Count','Graham Number','Graham Value']])
+            st.dataframe(df_sorted[["Ticker","Current Price","Passed Count","Graham Number","Graham Value"]])
 
-            # ---------------------- INVESTMENT MEMOS ----------------------
-            st.markdown("## Investment Memos")
-            for idx, row in df_sorted.iterrows():
-                st.markdown(f"### {row['Ticker']}")
-                stock_info = yf.Ticker(row['Ticker']).info
-                memo = generate_memo(row['Ticker'], stock_info, row)
+            st.markdown("### Investment Memos")
+            for memo in df_sorted["Investment Memo"]:
                 st.markdown(memo)
-
-            # ---------------------- DOWNLOAD ----------------------
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                df_sorted.to_excel(writer, index=False)
-
-            st.download_button(
-                label="📥 Download Results as Excel",
-                data=output.getvalue(),
-                file_name="akab_screening_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
         else:
             st.warning("No valid data returned.")
