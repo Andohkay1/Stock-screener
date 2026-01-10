@@ -122,6 +122,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Company Name": info.get("shortName", ticker),
             "Current Assets": est_current_assets,
             "Total Liabilities": est_total_liabilities,
+            "Current Ratio Num": current_ratio,
             "Current Price Num": current_price,
             "Graham Number Num": graham_number,
             "Graham Value Num": graham_value,
@@ -195,6 +196,9 @@ if st.button("🚀 Run Screener"):
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
+                    current_assets = r.get("Current Assets", 0)
+                    total_liabilities = r.get("Total Liabilities", 0)
+                    current_ratio = r.get("Current Ratio Num", 0)
 
                     # ===== VALUATION INSIGHT =====
                     if gn_val is None or gv_val is None or np.isnan(gn_val) or np.isnan(gv_val):
@@ -209,17 +213,17 @@ if st.button("🚀 Run Screener"):
                         else:
                             valuation_insight = "mixed valuation: price below Graham Number but above Graham Value"
 
-                    # ===== STRENGTH NOTE =====
-                    current_assets = r.get("Current Assets", 0)
-                    total_liabilities = r.get("Total Liabilities", 0)
+                    # ===== STRENGTH NOTE (improved) =====
                     if current_assets is None or total_liabilities is None or np.isnan(current_assets) or np.isnan(total_liabilities):
                         strength_note = "Insufficient data for strength check"
-                    elif current_assets > total_liabilities * 1.2:
-                        strength_note = "Strong liquidity: Current Assets comfortably cover Total Liabilities"
-                    elif current_assets >= total_liabilities:
-                        strength_note = "Adequate liquidity: Current Assets pay all Total Liabilities"
+                    elif current_ratio < 1:
+                        strength_note = "Weak liquidity: Current Ratio below 1 and Current Assets insufficient"
+                    elif current_assets > total_liabilities * 1.2 and current_ratio >= 2:
+                        strength_note = "Strong liquidity: Current Assets comfortably cover Total Liabilities and Current Ratio healthy"
+                    elif current_assets >= total_liabilities and current_ratio >= 1.5:
+                        strength_note = "Adequate liquidity: Current Assets cover Total Liabilities and Current Ratio moderate"
                     else:
-                        strength_note = "Weak liquidity: Current Assets do not cover Total Liabilities"
+                        strength_note = "Caution: Current Assets may cover Total Liabilities but Current Ratio is low"
 
                     news_text = fetch_news(r["Ticker"])
 
