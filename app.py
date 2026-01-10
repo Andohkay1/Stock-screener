@@ -213,7 +213,7 @@ if st.button("🚀 Run Screener"):
                         else:
                             valuation_insight = "mixed valuation: price below Graham Number but above Graham Value"
 
-                    # ===== STRENGTH NOTE (improved) =====
+                    # ===== STRENGTH NOTE =====
                     if current_assets is None or total_liabilities is None or np.isnan(current_assets) or np.isnan(total_liabilities):
                         strength_note = "Insufficient data for strength check"
                     elif current_ratio < 1:
@@ -225,12 +225,25 @@ if st.button("🚀 Run Screener"):
                     else:
                         strength_note = "Caution: Current Assets may cover Total Liabilities but Current Ratio is low"
 
+                    # ===== FINANCIAL STRENGTH DYNAMIC =====
+                    earnings_positive_5y = r["Positive EPS for 5Y"].startswith("Yes")
+                    dividend_paid = float(r["Pays Dividends"].split()[0]) > 0
+
+                    if earnings_positive_5y and dividend_paid:
+                        financial_strength = "Earnings consistently positive for last 5 years. Pays regular dividends."
+                    elif earnings_positive_5y:
+                        financial_strength = "Earnings consistently positive for last 5 years. No dividends paid."
+                    elif dividend_paid:
+                        financial_strength = "Inconsistent earnings, but pays regular dividends."
+                    else:
+                        financial_strength = "Earnings inconsistent and does not pay dividends."
+
                     news_text = fetch_news(r["Ticker"])
 
                     st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
                                 f"**Industry Note:** {industry_note}\n\n"
                                 f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
-                                f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
+                                f"**Financial Strength:** {financial_strength}\n\n"
                                 f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
                                 f"**Strength Note:** {strength_note}\n\n"
                                 f"**Risk Note:** Consider valuation sensitivity and market conditions.\n\n"
