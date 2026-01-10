@@ -28,7 +28,6 @@ industry_products = {
     "Financial Services": "offers banking, insurance, investment, and capital markets services.",
     "Industrial Metals & Mining": "produces and sells steel, aluminum, copper, and other industrial metals.",
     "Internet Content & Information": "provides search, advertising, cloud computing, and related internet services.",
-    # add more industries here
 }
 
 # ======= HELPER FUNCTIONS =======
@@ -126,6 +125,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Working Capital Num": wc,
             "Current Ratio Num": current_ratio,
             "Current Price Num": current_price,
+            "Price Ceiling Num": price_ceiling,  # <--- added
             "Graham Number Num": graham_number,
             "Graham Value Num": graham_value,
             "Industry": info.get("industry", "N/A"),
@@ -201,6 +201,8 @@ if st.button("🚀 Run Screener"):
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
+                    price_ceiling_num = r.get("Price Ceiling Num", 0)
+                    pb_ratio = float(r["P/B"].split()[0])
 
                     # ======= VALUATION INSIGHT =======
                     valuation_insight = (
@@ -210,7 +212,7 @@ if st.button("🚀 Run Screener"):
                         if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
                         else "mixed valuation as price is above Graham Number but below Graham Value"
                         if (gn_val and gv_val and current_price > gn_val and current_price < gv_val)
-                        else "mixed valuation as price is below Graham Number but above Graham Value"
+                        else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
                     # ======= STRENGTH NOTE =======
@@ -220,7 +222,6 @@ if st.button("🚀 Run Screener"):
                     wc = r.get("Working Capital Num", 0)
                     current_ratio = r.get("Current Ratio Num", 0)
 
-                    # Industry-specific adjustments
                     industry_lower = industry.lower()
                     if wc >= 0 and current_ratio >= 1:
                         strength_note = "Working capital positive; liquidity healthy for operations."
@@ -236,7 +237,7 @@ if st.button("🚀 Run Screener"):
                     risk_items = []
                     if current_ratio < 1:
                         risk_items.append("Liquidity is below safe threshold; may struggle to meet short-term obligations")
-                    if current_price > price_ceiling:
+                    if price_ceiling_num and current_price > price_ceiling_num:
                         risk_items.append("Price exceeds 15x 3-year average EPS; stock may be overvalued")
                     if pb_ratio > 1.5:
                         risk_items.append("Price-to-Book ratio is high; stock may be overvalued relative to net assets")
