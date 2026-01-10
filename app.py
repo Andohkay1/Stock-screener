@@ -40,20 +40,27 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # Current Assets and Liabilities
         ca_keys = ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"]
         cl_keys = ["AccountsPayable", "OtherCurrentLiabilities", "TaxPayable", "ShortLongTermDebt"]
         tl_keys = ["TotalLiab"]
 
-        ca = sum(bs.loc[key, col] if key in bs.index else 0 for key in ca_keys) if col else 0
-        cl = sum(bs.loc[key, col] if key in bs.index else 0 for key in cl_keys) if col else 0
-        tl = sum(bs.loc[key, col] if key in bs.index else 0 for key in tl_keys) if col else 0
+        def safe_sum(keys):
+            total = 0
+            for key in keys:
+                try:
+                    val = bs.loc[key, col] if key in bs.index else 0
+                    if pd.isna(val):
+                        val = 0
+                    total += val
+                except:
+                    total += 0
+            return total
 
-        # Working capital
+        ca = safe_sum(ca_keys) if col else 0
+        cl = safe_sum(cl_keys) if col else 0
+        tl = safe_sum(tl_keys) if col else 0
+
         wc = ca - cl
-
-        # CA vs TL
-        ca_vs_tl = ca - tl
         ca_vs_tl_flag = ca > tl
 
         # EPS calculations
@@ -84,18 +91,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
         # Screening metrics
-        current_ratio = info.get("currentRatio", 0)
-        revenue = info.get("totalRevenue", 0)
-        pb_ratio = info.get("priceToBook", 0)
-        current_price = info.get("currentPrice", 0)
-        dividend_rate = info.get("dividendRate", 0)
+        current_ratio = info.get("currentRatio", 0) or 0
+        revenue = info.get("totalRevenue", 0) or 0
+        pb_ratio = info.get("priceToBook", 0) or 0
+        current_price = info.get("currentPrice", 0) or 0
+        dividend_rate = info.get("dividendRate", 0) or 0
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
             "CA − TL > 0": ca_vs_tl_flag,
-            "Working Capital Positive": wc > 0,
             "Pays Dividends": dividend_rate > 0,
             "Positive EPS for 5Y": sum(eps > 0 for eps in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": current_price <= price_ceiling,
@@ -109,8 +115,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "CA − TL > 0": f"{ca_vs_tl:,.0f} {mark(criteria['CA − TL > 0'])}",
-            "Working Capital Positive": f"{wc:,.0f} {mark(criteria['Working Capital Positive'])}",
+            "CA − TL > 0": f"{ca - tl:,.0f} {mark(criteria['CA − TL > 0'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {mark(criteria['Positive EPS for 5Y'])}",
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
@@ -118,13 +123,12 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
             "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
+            # For memo only
             "Current Assets": ca,
             "Current Liabilities": cl,
             "Total Liabilities": tl,
             "Working Capital Num": wc,
             "Current Ratio Num": current_ratio,
-            "CA vs TL Num": ca_vs_tl,
-            "CA vs TL Flag": ca_vs_tl_flag,
             "Current Price Num": current_price,
             "Price Ceiling Num": price_ceiling,
             "Graham Number Num": graham_number,
@@ -185,7 +189,7 @@ if st.button("🚀 Run Screener"):
             # ======= DISPLAY TABLE =======
             table_cols = [
                 "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2",
-                "CA − TL > 0", "Working Capital Positive", "Pays Dividends",
+                "CA − TL > 0", "Pays Dividends",
                 "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B", "Passed Count",
                 "Graham Number", "Graham Value"
             ]
@@ -224,16 +228,13 @@ if st.button("🚀 Run Screener"):
                     wc = r.get("Working Capital Num", 0)
                     current_ratio = r.get("Current Ratio Num", 0)
 
-                    industry_lower = industry.lower()
-                    if wc >= 0 and current_ratio >= 1:
-                        strength_note = "Working capital positive; liquidity healthy for operations."
-                    elif wc >= 0 and current_ratio < 1:
-                        strength_note = "Working capital positive; liquidity may be tight."
+                    # Logic for memo only
+                    if ca > tl:
+                        strength_note = "Current Assets can pay all debt; liquidity healthy."
+                    elif ca < tl and wc > 0:
+                        strength_note = "Working capital positive, but Current Assets do not cover total debt."
                     else:
-                        if any(keyword in industry_lower for keyword in ["technology", "internet", "subscription", "retail"]):
-                            strength_note = "Working capital negative; likely normal for operational model."
-                        else:
-                            strength_note = "Working capital negative; liquidity may be tight."
+                        strength_note = "Working capital negative; liquidity may be tight."
 
                     # ======= RISK NOTE =======
                     risk_items = []
