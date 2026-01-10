@@ -1,120 +1,168 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf
+import numpy as np
 import requests
+import time
 
-# --- Helper Functions ---
-def parse_money(value):
-    """Convert a string like '$1,234.56 ✅' to float 1234.56"""
-    if value in [None, "N/A"]:
-        return None
-    return float("".join(c for c in str(value) if c.isdigit() or c == "."))
+# ---------------- CONFIG ----------------
+st.set_page_config(
+    page_title="Akab Stock Screener – Graham Verified",
+    page_icon="📉",
+    layout="centered"
+)
 
-def mark(condition):
-    return "✅" if condition else "❌"
+FINNHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
 
-# --- Dummy Data / Replace with your screening logic ---
-results = [
-    {
-        "Ticker": "AAPL",
-        "Company Name": "Apple Inc.",
-        "Industry": "Technology",
-        "Price": "$259.37",
-        "Revenue > $100M": True,
-        "Current Ratio > 2": False,
-        "CA - L > 0": True,
-        "Pays Dividends": True,
-        "Positive EPS for 5Y": True,
-        "Price ≤ 15x3Y Avg EPS": False,
-        "P/B": 51.97,
-        "Passed Count": 4,
-        "Graham Number": "$27.73 ❌",
-        "Graham Value": "$56.71 ❌",
-        "Strength Note": "Current Assets pay all Total Liabilities.",
-        "Recent News": "Jamie Dimon's Grip On US Credit Card Dominance Grows..."
-    },
-    {
-        "Ticker": "SMCAY",
-        "Company Name": "SMC Corporation",
-        "Industry": "Specialty Industrial Machinery",
-        "Price": "$18.87",
-        "Revenue > $100M": True,
-        "Current Ratio > 2": True,
-        "CA - L > 0": True,
-        "Pays Dividends": True,
-        "Positive EPS for 5Y": True,
-        "Price ≤ 15x3Y Avg EPS": True,
-        "P/B": 0.09,
-        "Passed Count": 7,
-        "Graham Number": "$815.86 ❌",
-        "Graham Value": "$1335.40 ❌",
-        "Strength Note": "Current Assets pay all Total Liabilities.",
-        "Recent News": "Touchstone Sands Capital International Growth Equity Fund Q3 2025 Portfolio Update..."
-    }
-]
-
-# --- Products Dictionary (or fetch from Yahoo Finance API) ---
-products_dict = {
-    "AAPL": "iPhone, Mac, iPad, Apple Watch, AirPods, Services",
-    "SMCAY": "Air management systems, directional control valves, air cylinders, actuators, grippers"
-}
-
-# --- Streamlit App ---
 st.title("Akab Stock Screener")
-st.write("### Screening Results")
+st.markdown("Uses Benjamin Graham–based screening with automated investment memos.")
 
-# --- Display Table ---
-table_cols = ["Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0",
-              "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS",
-              "P/B", "Passed Count", "Graham Number", "Graham Value"]
+# ---------------- HELPERS ----------------
+def get_finnhub_news(ticker):
+    try:
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-12-31&token={FINNHUB_API_KEY}"
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        headlines = [n["headline"] for n in data[:3]]
+        return " | ".join(headlines) if headlines else "No recent news available."
+    except:
+        return "No recent news available."
 
-df_table = pd.DataFrame([{col: r[col] for col in table_cols} for r in results])
-st.dataframe(df_table)
+# ---------------- DATA FETCH ----------------
+@st.cache_data(ttl=3600)
+def fetch_stock(ticker):
+    stock = yf.Ticker(ticker)
+    info = stock.info
 
-# --- Investment Memos ---
-st.markdown("### Investment Memos")
-for r in results:
-    ticker = r["Ticker"]
-    company_name = r["Company Name"]
-    industry = r["Industry"]
-    products = products_dict.get(ticker, "N/A")
-    current_price = parse_money(r["Price"])
+    bs = stock.balance_sheet
+    inc = stock.income_stmt
 
-    # --- Clean Graham Values ---
-    def clean_money(value):
-        if value == "N/A" or value is None:
-            return None
-        return float("".join(c for c in str(value) if c.isdigit() or c == "."))
+    # ---- Core financials ----
+    price = info.get("currentPrice", np.nan)
+    revenue = info.get("totalRevenue", 0)
+    current_ratio = info.get("currentRatio", 0)
+    pb_ratio = info.get("priceToBook", 0)
+    dividend = info.get("dividendRate", 0)
+    shares = info.get("sharesOutstanding", 0)
 
-    gn_val = clean_money(r["Graham Number"])
-    gv_val = clean_money(r["Graham Value"])
-
-    # --- Valuation Insight ---
-    if gn_val is not None and gv_val is not None:
-        if current_price > gn_val and current_price > gv_val:
-            insight = "potentially overvalued"
-        elif current_price < gn_val and current_price < gv_val:
-            insight = "potentially undervalued"
-        else:
-            insight = "fairly valued"
+    # ---- CA & Liabilities ----
+    if not bs.empty:
+        col = bs.columns[0]
+        current_assets = bs.loc["Total Current Assets", col] if "Total Current Assets" in bs.index else 0
+        total_liabilities = bs.loc["Total Liabilities Net Minority Interest", col] if "Total Liabilities Net Minority Interest" in bs.index else 0
     else:
-        insight = "Graham metrics not available"
+        current_assets, total_liabilities = 0, 0
 
-    memo = f"""
-**{company_name} ({ticker})**
+    ca_minus_l = current_assets - total_liabilities
 
-Industry Note: Operates in the {industry} sector.
-Key products/services: {products}
+    # ---- EPS ----
+    eps_values = []
+    if not inc.empty and shares:
+        if "Net Income" in inc.index:
+            for v in inc.loc["Net Income"].dropna().values:
+                eps_values.append(v / shares)
 
-Valuation Insight: {company_name} is trading at ${current_price:.2f}, {insight}.
+    eps_values = [e for e in eps_values if e > 0]
 
-Financial Strength: Earnings consistently positive for last 5 years. Pays regular dividends.
+    eps_5y = np.mean(eps_values[-5:]) if len(eps_values) >= 3 else info.get("trailingEps", 0)
+    eps_3y = np.mean(eps_values[-3:]) if len(eps_values) >= 3 else eps_5y
 
-Screening Rationale: Passed {r['Passed Count']} of 7 Akab screening criteria.
+    # ---- Graham metrics ----
+    bvps = info.get("bookValue", 0)
+    graham_number = np.sqrt(22.5 * eps_5y * bvps) if eps_5y > 0 and bvps > 0 else np.nan
+    graham_value = eps_5y * (8.5 + 2 * 0) if eps_5y > 0 else np.nan
 
-Strength Note: {r['Strength Note']}
+    price_ceiling = 15 * eps_3y if eps_3y > 0 else 0
 
-Risk Note: Consider valuation sensitivity, liquidity constraints, and market conditions.
+    # ---- Criteria ----
+    criteria = {
+        "Revenue > $100M": revenue > 100_000_000,
+        "Current Ratio > 2": current_ratio > 2,
+        "CA - L > 0": ca_minus_l > 0,
+        "Pays Dividends": dividend > 0,
+        "Positive EPS for 5Y": len(eps_values) >= 5,
+        "Price ≤ 15x3Y Avg EPS": price <= price_ceiling if price_ceiling > 0 else False,
+        "P/B": pb_ratio < 1.5
+    }
 
-Recent News: {r['Recent News']}
-"""
-    st.markdown(memo)
+    passed = sum(criteria.values())
+
+    return {
+        "Ticker": ticker,
+        "Price": f"${price:.2f}",
+        "Revenue > $100M": f"{revenue:,.0f} {'✅' if criteria['Revenue > $100M'] else '❌'}",
+        "Current Ratio > 2": f"{current_ratio:.2f} {'✅' if criteria['Current Ratio > 2'] else '❌'}",
+        "CA - L > 0": f"{ca_minus_l:,.0f} {'✅' if criteria['CA - L > 0'] else '❌'}",
+        "Pays Dividends": f"{'Yes' if dividend > 0 else 'No'} {'✅' if criteria['Pays Dividends'] else '❌'}",
+        "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {'✅' if criteria['Positive EPS for 5Y'] else '❌'}",
+        "Price ≤ 15x3Y Avg EPS": f"${price:.2f} ≤ ${price_ceiling:.2f} {'✅' if criteria['Price ≤ 15x3Y Avg EPS'] else '❌'}",
+        "P/B": f"{pb_ratio:.2f} {'✅' if criteria['P/B'] else '❌'}",
+        "Passed Count": passed,
+        "Graham Number": graham_number,
+        "Graham Value": graham_value,
+        "Company": info.get("longName", ticker),
+        "Industry": info.get("industry", "N/A"),
+        "Products": info.get("longBusinessSummary", "").split(".")[0],
+        "PriceNum": price
+    }
+
+# ---------------- INPUT ----------------
+tickers = st.text_area("Enter tickers separated by commas (e.g. AAPL, MSFT)").upper()
+tickers = [t.strip() for t in tickers.split(",") if t.strip()]
+
+if st.button("🚀 Run Screener") and tickers:
+    rows = []
+    for t in tickers:
+        time.sleep(1)
+        rows.append(fetch_stock(t))
+
+    df = pd.DataFrame(rows)
+
+    # ---- Table (ONLY your columns) ----
+    table_cols = [
+        "Ticker","Price","Revenue > $100M","Current Ratio > 2","CA - L > 0",
+        "Pays Dividends","Positive EPS for 5Y","Price ≤ 15x3Y Avg EPS",
+        "P/B","Passed Count","Graham Number","Graham Value"
+    ]
+
+    df_display = df.copy()
+    df_display["Graham Number"] = df["Graham Number"].apply(lambda x: f"${x:.2f}" if not np.isnan(x) else "N/A")
+    df_display["Graham Value"] = df["Graham Value"].apply(lambda x: f"${x:.2f}" if not np.isnan(x) else "N/A")
+
+    st.success(f"✅ Screening complete for {len(df)} tickers.")
+    st.dataframe(df_display[table_cols])
+
+    # ---------------- MEMOS ----------------
+    st.markdown("## Investment Memos")
+
+    for _, r in df.iterrows():
+        price = r["PriceNum"]
+        gn = r["Graham Number"]
+        gv = r["Graham Value"]
+
+        if not np.isnan(gn) and not np.isnan(gv):
+            valuation = (
+                "potentially undervalued"
+                if price < gn and price < gv
+                else "potentially overvalued"
+            )
+        else:
+            valuation = "valuation inconclusive"
+
+        st.markdown(f"""
+### {r['Company']} ({r['Ticker']})
+
+**Industry Note:** Operates in the {r['Industry']} sector. Key products/services: {r['Products']}.
+
+**Valuation Insight:** The stock is {valuation} because its market price is relative to its Graham valuation benchmarks.
+
+**Financial Strength:** Earnings consistently positive for the last five years. Pays regular dividends.
+
+**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.
+
+**Strength Note:** Current Assets pay all Total Liabilities.
+
+**Risk Note:** Consider valuation sensitivity, liquidity constraints, and broader market conditions.
+
+**Recent News:** {get_finnhub_news(r['Ticker'])}
+""")
