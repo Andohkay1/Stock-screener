@@ -6,7 +6,7 @@ import io
 import time
 import requests
 
-# ======= CONFIG =======
+# ================= CONFIG =================
 FINNHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
 
 st.set_page_config(
@@ -18,65 +18,37 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# ======= INDUSTRY PRODUCTS =======
+# ================= INDUSTRY MAP =================
 industry_products = {
-    "Internet Content & Information": "provides search, digital advertising, cloud computing, and internet-based platforms.",
-    "Technology": "develops software, hardware, and digital infrastructure.",
-    "Consumer Defensive": "produces and distributes consumer staple products.",
+    "Technology": "produces software, hardware, and related digital services.",
+    "Consumer Electronics": "produces smartphones, computers, and consumer devices.",
+    "Healthcare": "develops pharmaceuticals, medical devices, and healthcare services.",
+    "Energy": "explores and produces oil, gas, and renewable energy.",
     "Financial Services": "offers banking, insurance, and investment services.",
-    "Healthcare": "develops pharmaceuticals, medical devices, and healthcare solutions.",
-    "Energy": "produces and distributes oil, gas, and renewable energy.",
-    "Industrials": "manufactures industrial equipment and machinery."
+    "Industrial Metals & Mining": "produces steel, aluminum, and industrial metals."
 }
 
-# ======= STRENGTH & RISK HELPERS =======
-
-def get_strength_note(ca, cl, tl, wc, cr):
-    if ca > tl and cr >= 1:
-        return "Current Assets can pay all debt; balance sheet strength is strong."
-    if wc >= 0 and cr >= 1:
-        return "Working capital positive with acceptable liquidity."
-    return None
-
-
-def get_liquidity_risk(ca, cl, tl, wc, cr):
-    if ca <= tl:
-        return "Current Assets do not cover total liabilities; leverage risk."
-    if wc < 0 and cr < 1:
-        return "Working capital negative and current ratio below 1; liquidity may be tight."
-    if wc >= 0 and cr < 1:
-        return "Working capital positive but current ratio below 1; short-term liquidity risk."
-    if wc < 0 and cr >= 1:
-        return "Negative working capital suggests reliance on operating cash flows."
-    return None
-
-
-def get_screening_risk_notes(failed_criteria, criteria_risks):
-    return [criteria_risks[c] for c in failed_criteria if c in criteria_risks]
-
-# ======= FETCH FINANCIALS =======
-
-def fetch_financials(ticker, current_bond_yield=4.4):
+# ================= DATA FETCH =================
+def fetch_financials(ticker, bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        bs = stock.balance_sheet
-        inc = stock.income_stmt
 
+        bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
+        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # ----- Current Assets -----
+        # ---- Assets & Liabilities ----
         current_assets = float(info.get("totalCurrentAssets", 0) or 0)
-
-        # ----- Current Liabilities -----
         current_liabilities = float(info.get("currentLiabilities", 0) or 0)
-
-        # ----- Total Liabilities -----
         total_liabilities = float(info.get("totalLiab", 0) or current_liabilities)
 
         working_capital = current_assets - current_liabilities
+        current_ratio = info.get("currentRatio", 0) or (
+            current_assets / current_liabilities if current_liabilities else 0
+        )
 
-        # ----- EPS -----
+        # ---- EPS ----
         shares = info.get("sharesOutstanding", 0)
         eps_values = []
 
@@ -84,91 +56,85 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             for ni in inc.loc["Net Income"].dropna():
                 eps_values.append(ni / shares)
 
-        eps_values = [e for e in eps_values if e > 0]
-
         if not eps_values:
-            eps_values = [info.get("trailingEps", 0)] * 5
+            eps_values = [info.get("trailingEps", 0)] * 7
 
         eps_5 = np.mean(eps_values[-5:])
         eps_7 = np.mean(eps_values[-7:])
 
         eps_growth = 0
-        if len(eps_values) >= 2 and eps_values[0] > 0:
+        if eps_values[0] > 0:
             eps_growth = (eps_values[-1] - eps_values[0]) / eps_values[0]
 
-        # ----- Graham -----
+        # ---- Graham ----
         bvps = info.get("bookValue", 0)
         graham_number = np.sqrt(22.5 * eps_7 * bvps) if eps_7 > 0 and bvps > 0 else None
-        graham_value = eps_5 * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5 > 0 else None
+        graham_value = eps_5 * (8.5 + 2 * eps_growth) * (4.4 / bond_yield) if eps_5 > 0 else None
 
-        # ----- Ratios -----
-        current_ratio = info.get("currentRatio", 0) or (
-            current_assets / current_liabilities if current_liabilities else 0
-        )
-
+        # ---- Screening ----
+        price = float(info.get("currentPrice", 0))
         revenue = info.get("totalRevenue", 0)
-        pb_ratio = info.get("priceToBook", 0)
-        price = info.get("currentPrice", 0)
-        dividend_rate = info.get("dividendRate", 0)
+        pb = info.get("priceToBook", 0)
+        dividend = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5 if eps_5 > 0 else 0
 
-        # ----- Screening Criteria -----
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
             "CA - L > 0": current_assets > total_liabilities,
-            "Pays Dividends": dividend_rate > 0,
-            "Positive EPS for 5Y": len(eps_values[-5:]) >= 4,
+            "Pays Dividends": dividend > 0,
+            "Positive EPS for 5Y": sum(e > 0 for e in eps_values[-5:]) >= 4,
             "Price ≤ 15x3Y Avg EPS": price <= price_ceiling,
-            "P/B < 1.5": pb_ratio < 1.5,
+            "P/B < 1.5": pb < 1.5
         }
 
-        criteria_risks = {
-            "Revenue > $100M": "Revenue scale is limited; business stability risk.",
-            "Current Ratio > 2": "Liquidity below conservative threshold.",
-            "CA - L > 0": "Assets do not cover total liabilities.",
-            "Pays Dividends": "No dividend payout; return depends on price appreciation.",
-            "Positive EPS for 5Y": "Earnings history inconsistent.",
-            "Price ≤ 15x3Y Avg EPS": "Valuation exceeds earnings-based ceiling.",
-            "P/B < 1.5": "High price-to-book; valuation risk."
+        risks_map = {
+            "Revenue > $100M": "Revenue is low; scale risk.",
+            "Current Ratio > 2": "Low liquidity buffer.",
+            "CA - L > 0": "Current Assets do not cover total liabilities.",
+            "Pays Dividends": "No dividends paid.",
+            "Positive EPS for 5Y": "Earnings inconsistency risk.",
+            "Price ≤ 15x3Y Avg EPS": "Stock trades above earnings-based ceiling.",
+            "P/B < 1.5": "High valuation relative to book value."
         }
-
-        passed = sum(criteria.values())
-
-        mark = lambda x: "✅" if x else "❌"
 
         return {
             "Ticker": ticker,
-            "Price": price,
-            "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
-            "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
-            "CA - L > 0": f"{(current_assets - total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
-            "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else "0.00 ❌",
-            "Positive EPS for 5Y": f"Yes {mark(criteria['Positive EPS for 5Y'])}",
-            "Price ≤ 15x3Y Avg EPS": f"${price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}",
-            "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
-            "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f}" if graham_number else "N/A",
-            "Graham Value": f"${graham_value:.2f}" if graham_value else "N/A",
-            "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
+            "Industry": info.get("industry", "N/A"),
+            "Price": price,
+            "Passed Count": sum(criteria.values()),
+            "Criteria": criteria,
+            "Criteria Risks": risks_map,
+            "Failed Criteria": [k for k, v in criteria.items() if not v],
             "Current Assets": current_assets,
             "Current Liabilities": current_liabilities,
             "Total Liabilities": total_liabilities,
             "Working Capital": working_capital,
             "Current Ratio Num": current_ratio,
-            "Failed Criteria": [k for k, v in criteria.items() if not v],
-            "Criteria Risks": criteria_risks,
+            "Graham Number": graham_number,
+            "Graham Value": graham_value
         }
 
     except Exception as e:
-        st.error(f"Error fetching data for {ticker}: {e}")
+        st.error(f"{ticker}: {e}")
         return None
 
-# ======= INPUT =======
-tickers = st.text_area("Enter tickers separated by commas").upper().split(",")
+# ================= NEWS =================
+def fetch_news(symbol):
+    try:
+        url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from=2025-01-01&to=2026-01-09&token={FINNHUB_API_KEY}"
+        r = requests.get(url)
+        if r.status_code == 200:
+            headlines = [x["headline"] for x in r.json() if "headline" in x]
+            return " | ".join(headlines[:5]) if headlines else "No recent news."
+    except:
+        pass
+    return "No recent news."
 
-# ======= RUN =======
+# ================= INPUT =================
+tickers = st.text_area("Enter tickers (comma separated)").upper().split(",")
+
 if st.button("🚀 Run Screener"):
     results = []
     for t in tickers:
@@ -178,29 +144,47 @@ if st.button("🚀 Run Screener"):
             if data:
                 results.append(data)
 
-    df = pd.DataFrame(results)
-    st.dataframe(df)
+    df = pd.DataFrame(results).sort_values("Passed Count", ascending=False)
 
-    st.markdown("### Investment Memos")
+    st.success(f"Screened {len(df)} tickers")
+
+    # ================= MEMOS =================
+    st.markdown("## Investment Memos")
 
     for _, r in df.iterrows():
-        ca, cl, tl, wc, cr = r["Current Assets"], r["Current Liabilities"], r["Total Liabilities"], r["Working Capital"], r["Current Ratio Num"]
+        ca = r["Current Assets"]
+        tl = r["Total Liabilities"]
+        wc = r["Working Capital"]
+        cr = r["Current Ratio Num"]
 
-        strength = get_strength_note(ca, cl, tl, wc, cr) or "No balance sheet strength identified."
-        risks = []
+        # ---- Strength ----
+        strength_note = "No material balance sheet strength identified."
+        if ca > tl:
+            strength_note = "Current Assets fully cover total liabilities; strong balance sheet."
 
-        liq_risk = get_liquidity_risk(ca, cl, tl, wc, cr)
-        if liq_risk:
-            risks.append(liq_risk)
+        # ---- Risk ----
+        risk_notes = []
 
-        risks.extend(get_screening_risk_notes(r["Failed Criteria"], r["Criteria Risks"]))
+        if wc < 0:
+            risk_notes.append("Working capital negative; liquidity may be tight.")
+        elif ca <= tl and wc >= 0 and cr >= 1:
+            risk_notes.append("Working capital positive, but assets do not cover liabilities.")
 
-        risk_note = "Potential risks: " + "; ".join(risks) if risks else "No major risks identified."
+        for f in r["Failed Criteria"]:
+            risk_notes.append(r["Criteria Risks"][f])
 
-        st.markdown(f"""
+        risk_note = "; ".join(set(risk_notes)) if risk_notes else "No major risks identified."
+
+        st.markdown(
+            f"""
 **{r['Company Name']} ({r['Ticker']})**
 
-**Strength Note:** {strength}
+**Industry:** {r['Industry']}
 
-**Risk Note:** {risk_note}
-""")
+**Strength:** {strength_note}
+
+**Risk:** {risk_note}
+
+**Recent News:** {fetch_news(r['Ticker'])}
+"""
+        )
