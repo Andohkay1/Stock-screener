@@ -126,6 +126,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Current Price Num": current_price,
             "Graham Number Num": graham_number,
             "Graham Value Num": graham_value,
+            "Long Summary": info.get("longBusinessSummary", "")
         }
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
@@ -191,8 +192,17 @@ if st.button("🚀 Run Screener"):
                 try:
                     company_name = r["Company Name"]
                     industry = r["Industry"]
-                    products = industry_products.get(industry, "")
-                    industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
+                    long_summary = r.get("Long Summary", "")
+                    if long_summary:
+                        company_products = long_summary.split(".")[0]
+                        industry_note = f"{company_name} operates in the {industry} sector. Key products/services: {company_products}."
+                    else:
+                        products = industry_products.get(industry, None)
+                        if products:
+                            industry_note = f"Operates in the {industry} sector. Key products/services: {products}"
+                        else:
+                            industry_note = f"Operates in the {industry} sector."
+
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
