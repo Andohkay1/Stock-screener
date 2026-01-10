@@ -191,7 +191,7 @@ if st.button("🚀 Run Screener"):
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
-
+                    valuation_insight = "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val) else "potentially undervalued as price below graham value and number"
 
                     strength_note = "Current Assets pay all Total Liabilities."
                     news_text = fetch_news(r["Ticker"])
