@@ -29,7 +29,7 @@ industry_products = {
     "Industrial Metals & Mining": "produces and sells steel, aluminum, copper, and other industrial metals.",
 }
 
-# ======= HELPER FUNCTIONS =======
+# ======= FETCH FINANCIALS =======
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
@@ -38,7 +38,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # ===== Current Assets =====
+        # Current Assets
         current_assets = 0
         if col and not bs.empty:
             current_assets = sum(
@@ -47,7 +47,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_assets = float(current_assets or info.get("totalCurrentAssets", 0) or 0)
 
-        # ===== Current Liabilities =====
+        # Current Liabilities
         current_liabilities = 0
         if col and not bs.empty:
             current_liabilities = sum(
@@ -56,13 +56,13 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_liabilities = float(current_liabilities or info.get("currentLiabilities", 0) or 0)
 
-        # ===== Total Liabilities =====
+        # Total Liabilities
         total_liabilities = float(info.get("totalLiab", 0) or current_liabilities)
 
-        # ===== Working Capital =====
+        # Working Capital
         working_capital = current_assets - current_liabilities
 
-        # ===== EPS Calculations =====
+        # EPS Calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -98,7 +98,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
-        # --- Screening Criteria ---
+        # Screening Criteria
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -196,6 +196,19 @@ if st.button("🚀 Run Screener"):
         if results:
             df = pd.DataFrame(results)
             df_sorted = df.sort_values("Passed Count", ascending=False)
+
+            # Add ✅/❌ for Graham Number and Value
+            def mark_graham(price, gn, gv):
+                gn_mark = "✅" if gn and price <= gn else "❌"
+                gv_mark = "✅" if gv and price <= gv else "❌"
+                gn_display = f"{gn:,.2f} {gn_mark}" if gn else "N/A ❌"
+                gv_display = f"{gv:,.2f} {gv_mark}" if gv else "N/A ❌"
+                return gn_display, gv_display
+
+            df_sorted["Graham Number"], df_sorted["Graham Value"] = zip(*df_sorted.apply(
+                lambda x: mark_graham(x["Price"], x["Graham Number"], x["Graham Value"]), axis=1
+            ))
+
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
 
             # ======= DISPLAY TABLE =======
@@ -220,8 +233,8 @@ if st.button("🚀 Run Screener"):
                     gn_val = r["Graham Number"]
                     gv_val = r["Graham Value"]
                     valuation_insight = (
-                        "potentially overvalued as price above Graham Number and Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
-                        else "potentially undervalued as price below Graham Number and Graham Value" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
+                        "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
+                        else "potentially undervalued as price below graham value and number" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
                         else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price < gv_val)
                         else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
@@ -233,25 +246,19 @@ if st.button("🚀 Run Screener"):
                     wc = r.get("Working Capital", 0)
                     current_ratio = r.get("Current Ratio Num", 0)
 
-                    if ca > tl and current_ratio >= 1:
+                    if ca > tl and current_ratio > 2:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
-                    elif wc >= 0:
-                        if current_ratio >= 1:
-                            strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity acceptable."
-                        else:
-                            strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity may be tight."
+                    elif wc >= 0 and current_ratio >= 1:
+                        strength_note = "Working capital positive; liquidity may be acceptable."
                     else:
-                        if current_ratio >= 1:
-                            strength_note = "Working capital negative; liquidity may be acceptable due to industry operations."
-                        else:
-                            strength_note = "Working capital negative; liquidity may be tight."
+                        strength_note = "Working capital negative; liquidity may be tight."
 
                     # ======= Dynamic Descriptive Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
                     criteria_risks = r.get("Criteria Risks", {})
 
                     # Exclude liquidity metrics from risk note
-                    risk_exclude = ["Current Ratio > 2", "CA - L > 0"]
+                    risk_exclude = []
                     filtered_failed = [c for c in failed_criteria if c not in risk_exclude]
 
                     if filtered_failed:
