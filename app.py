@@ -2,25 +2,48 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
+import requests
 import io
 import time
 
+# -----------------------------
+# Finnhub API Setup
+# -----------------------------
+FINNHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"  # Your API key
+FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/company-news"
+
+def fetch_company_news(ticker, last_days=30):
+    try:
+        import datetime
+        today = datetime.date.today()
+        start_date = today - datetime.timedelta(days=last_days)
+        url = f"{FINNHUB_NEWS_URL}?symbol={ticker}&from={start_date}&to={today}&token={FINNHUB_API_KEY}"
+        response = requests.get(url)
+        data = response.json()
+        headlines = []
+        for item in data[:2]:  # top 2 headlines
+            title = item.get("headline", "")
+            source = item.get("source", "")
+            if title:
+                headlines.append(f"{title} ({source})")
+        return headlines
+    except:
+        return []
+
+# -----------------------------
+# Streamlit UI Setup
+# -----------------------------
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
     layout="centered"
 )
-
 st.title("Akab Stock Screener")
-st.markdown("Uses verified EPS logic for Graham Number and Value.")
+st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# ---------------- SESSION STATE ----------------
-if "results" not in st.session_state:
-    st.session_state["results"] = []
-if "memo_data" not in st.session_state:
-    st.session_state["memo_data"] = []
-
-# ---------------- FETCH FINANCIALS ----------------
+# -----------------------------
+# Financial Fetcher
+# -----------------------------
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
@@ -28,21 +51,16 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
-
         col = bs.columns[0] if not bs.empty else None
 
+        # Current assets and liabilities
         est_current_assets, est_total_liabilities = 0, 0
         if col:
-            if "Total Current Assets" in bs.index:
-                est_current_assets = bs.loc["Total Current Assets", col]
-            else:
-                est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
-                    "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
-                ])
-            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
-                "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
-            ])
+            est_current_assets = bs.loc["Total Current Assets", col] if "Total Current Assets" in bs.index else \
+                sum(bs.loc[key, col] if key in bs.index else 0 for key in ["CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"])
+            est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in ["TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"])
 
+        # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -68,6 +86,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
+        # Key metrics
         current_ratio = info.get("currentRatio", 0)
         revenue = info.get("totalRevenue", 0)
         pb_ratio = info.get("priceToBook", 0)
@@ -75,6 +94,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
+        # Screening criteria
         criteria = {
             "Revenue > $100M": revenue > 100_000_000,
             "Current Ratio > 2": current_ratio > 2,
@@ -88,14 +108,45 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         def mark(val): return "✅" if val else "❌"
 
-        metrics = {
-            "price": current_price,
-            "graham_number": graham_number if not np.isnan(graham_number) else float("inf"),
-            "pb_ratio": pb_ratio,
-            "current_ratio": current_ratio
-        }
+        # -----------------------------
+        # Generate Investment Memo
+        # -----------------------------
+        memo_parts = []
 
-        table_data = {
+        # Business description
+        business_summary = info.get("longBusinessSummary", "Business summary unavailable.")
+        sector = info.get("sector", "Sector unavailable")
+        industry = info.get("industry", "Industry unavailable")
+        memo_parts.append(f"**Business Description:** {business_summary} Operates in the {industry} segment of the {sector} sector.")
+
+        # Valuation insight
+        val_text = "Valuation metrics are neutral."
+        if current_price and graham_value:
+            if current_price > graham_value:
+                val_text = f"The stock is currently trading above its Graham Number (${graham_number:.2f}) and Graham Value (${graham_value:.2f}), indicating potential overvaluation."
+            elif current_price < graham_value:
+                val_text = f"The stock is trading below its Graham benchmarks, suggesting potential undervaluation."
+        memo_parts.append(f"**Valuation Insight:** {val_text}")
+
+        # Financial strength
+        fin_text = f"Earnings consistently positive for last 5 years. {'Pays regular dividends.' if dividend_rate else 'No dividend payments.'}"
+        memo_parts.append(f"**Financial Strength:** {fin_text}")
+
+        # Screening rationale
+        memo_parts.append(f"**Screening Rationale:** Passed {passed} of 7 Akab screening criteria.")
+
+        # Risk note
+        risk_text = "Key considerations include valuation sensitivity, liquidity constraints."
+        memo_parts.append(f"**Risk Note:** {risk_text}")
+
+        # Recent news
+        news = fetch_company_news(ticker)
+        if news:
+            memo_parts.append(f"**Recent News:** {'; '.join(news)}")
+
+        memo_text = "\n\n".join(memo_parts)
+
+        return {
             "Ticker": ticker,
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
@@ -107,70 +158,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A"
+            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
+            "Investment Memo": memo_text
         }
-
-        # Keep full data for memo
-        full_data = {
-            **table_data,
-            "metrics": metrics,
-            "criteria": criteria,
-            "eps_values": eps_values,
-            "eps_growth": eps_growth,
-            "bvps": bvps
-        }
-
-        return full_data
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# ---------------- GENERATE INVESTMENT NOTES ----------------
-def generate_stock_notes(ticker, metrics, criteria, passed):
-    stock = yf.Ticker(ticker)
-    info = stock.info
-
-    business = info.get("longBusinessSummary", "Business description not available.")
-    sector = info.get("sector", "Unknown sector")
-    industry = info.get("industry", "Unknown industry")
-    short_business = business.split(".")[0] + "." if business else f"Company in {industry} sector."
-
-    # Valuation insight
-    valuation_notes = []
-    if metrics["price"] < metrics["graham_number"]:
-        valuation_notes.append("The stock trades below its estimated intrinsic value (Graham Number).")
-    if metrics["pb_ratio"] < 1.5:
-        valuation_notes.append("Price-to-book ratio is below 1.5, indicating potential undervaluation.")
-    valuation_text = " ".join(valuation_notes) if valuation_notes else "Valuation metrics are neutral."
-
-    # Financial strength
-    fs_notes = []
-    if metrics["current_ratio"] > 2:
-        fs_notes.append("Strong liquidity position (Current Ratio > 2).")
-    if criteria.get("Positive EPS for 5 Years", False):
-        fs_notes.append("Earnings consistently positive for 5 years.")
-    if criteria.get("Pays Dividends", False):
-        fs_notes.append("Pays regular dividends.")
-    fs_text = " ".join(fs_notes) if fs_notes else "Limited balance sheet/earnings data."
-
-    # Screening rationale
-    screening_text = f"Passed {passed} of 7 Akab screening criteria."
-
-    # Risk note
-    risk_notes = []
-    if metrics["pb_ratio"] > 1.2:
-        risk_notes.append("valuation sensitivity")
-    if metrics["current_ratio"] < 2:
-        risk_notes.append("liquidity constraints")
-    if sector in ["Energy", "Materials", "Industrials"]:
-        risk_notes.append("cyclical sector exposure")
-    risk_text = "Key considerations include " + ", ".join(risk_notes) + "." if risk_notes else ""
-
-    summary = f"{short_business}\n\nValuation Insight: {valuation_text}\n\nFinancial Strength: {fs_text}\n\nScreening Rationale: {screening_text}\n\nRisk Note: {risk_text}"
-    return summary
-
-# ---------------- STREAMLIT UI ----------------
+# -----------------------------
+# User Input
+# -----------------------------
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
@@ -183,65 +181,42 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
-# ---------------- RUN SCREENER ----------------
+# -----------------------------
+# Run Screener
+# -----------------------------
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
     else:
         with st.spinner("Running screen..."):
-            st.session_state["results"] = []
-            st.session_state["memo_data"] = []
+            results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
                 time.sleep(1.5)
                 data = fetch_financials(t)
                 if data:
-                    st.session_state["results"].append({k: v for k, v in data.items() if k not in ["metrics","criteria","eps_values","eps_growth","bvps"]})
-                    st.session_state["memo_data"].append(data)
-                progress.progress((idx + 1)/len(tickers))
+                    results.append(data)
+                progress.progress((idx + 1) / len(tickers))
 
-# ---------------- DISPLAY TABLE ----------------
-if st.session_state["results"]:
-    df = pd.DataFrame(st.session_state["results"])
-    df_sorted = df.sort_values("Passed Count", ascending=False)
-    st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-    st.dataframe(df_sorted)
+        if results:
+            df = pd.DataFrame(results)
+            df_sorted = df.sort_values("Passed Count", ascending=False)
+            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+            st.dataframe(df_sorted.drop(columns=["Investment Memo"]))
 
-# ---------------- INVESTMENT MEMOS ----------------
-st.markdown("### 📌 Investment Notes (Akab Model)")
-if st.checkbox("Show Investment Memos"):
-    for stock_data in st.session_state["memo_data"]:
-        summary = generate_stock_notes(
-            stock_data["Ticker"],
-            stock_data["metrics"],
-            stock_data["criteria"],
-            stock_data["Passed Count"]
-        )
-        with st.expander(f"{stock_data['Ticker']} – Investment Summary"):
-            st.write(summary)
+            st.markdown("### Investment Memos")
+            for item in results:
+                st.subheader(item['Ticker'])
+                st.markdown(item['Investment Memo'])
 
-# ---------------- UNDERSTANDING RESULTS ----------------
-st.markdown("### Understanding Your Results – Akab Model")
-st.markdown("""
-The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
-
-✅ A green check means the company meets that criterion.  
-❌ A red X means it does not.  
-**Passed Count** shows how many of the 7 criteria were met.
-
-The **Graham Number** and **Graham Value** provide benchmarks for fair valuation. If the stock price is below these, the model flags it as potentially undervalued with a ✅. These two are shown for context but are not included in the 7-pass total.
-
-Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
-""")
-
-# ---------------- EXPORT EXCEL ----------------
-if st.session_state["results"]:
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df_sorted.to_excel(writer, index=False)
-    st.download_button(
-        label="📥 Download Results as Excel",
-        data=output.getvalue(),
-        file_name="akab_screening_results.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df_sorted.to_excel(writer, index=False)
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=output.getvalue(),
+                file_name="akab_screening_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No valid data returned.")
