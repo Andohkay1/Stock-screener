@@ -111,6 +111,19 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         mark = lambda val: "✅" if val else "❌"
 
+        # Mapping failed criteria to explanations
+        criteria_risks = {
+            "Revenue > $100M": "Revenue is low; company may lack scale for stability.",
+            "Current Ratio > 2": "Liquidity is below safe threshold; company may struggle to meet short-term obligations.",
+            "CA - L > 0": "Current Assets do not cover total liabilities; risk of solvency issues under stress.",
+            "Pays Dividends": "Does not pay dividends; may indicate weaker shareholder returns or cash allocation priorities.",
+            "Positive EPS for 5Y": "Earnings are inconsistent; profitability risk exists.",
+            "Price ≤ 15x3Y Avg EPS": "Stock price exceeds 15x 3-year average EPS; potentially overvalued.",
+            "P/B < 1.5": "Price-to-Book ratio is high; stock may be overvalued relative to net assets.",
+        }
+
+        failed_criteria = [k for k, v in criteria.items() if v is False]
+
         return {
             "Ticker": ticker,
             "Price": current_price,
@@ -131,7 +144,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Total Liabilities": total_liabilities,
             "Current Ratio Num": current_ratio,
             "Working Capital": working_capital,
-            "Failed Criteria": [k for k, v in criteria.items() if not v],  # for dynamic Risk Note
+            "Failed Criteria": failed_criteria,
+            "Criteria Risks": criteria_risks,
         }
 
     except Exception as e:
@@ -225,10 +239,11 @@ if st.button("🚀 Run Screener"):
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
 
-                    # ======= Dynamic Risk Note =======
+                    # ======= Dynamic Descriptive Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
+                    criteria_risks = r.get("Criteria Risks", {})
                     if failed_criteria:
-                        risk_note = "Potential risks: " + ", ".join(failed_criteria) + ". Consider valuation sensitivity and market conditions."
+                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in failed_criteria]) + ". Consider market conditions."
                     else:
                         risk_note = "No major screening risks identified. Consider general market conditions."
 
