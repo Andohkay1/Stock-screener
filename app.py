@@ -6,9 +6,7 @@ import io
 import time
 import requests
 
-# --- FINHUB API KEY ---
-FINHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
-
+# --- CONFIG ---
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
@@ -18,21 +16,39 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
-# Helper function to parse numbers from strings like "$27.73"
-def parse_money(value):
-    try:
-        return float(str(value).replace("$", "").replace(",", ""))
-    except:
-        return None
+FINHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
 
-# Fetch financials and compute Graham metrics
+# Predefined products/services dictionary
+products_dict = {
+    "AAPL": "iPhone, Mac, iPad, AirPods, Apple Watch, Apple TV, Apple Services",
+    "SMCAY": "Air management system, directional control valves, air cylinders, rotary actuators, air grippers, magnet grippers, electric actuators/cylinders",
+    "MSFT": "Windows OS, Office Suite, Azure Cloud, Xbox, Surface devices, LinkedIn",
+    # Add other tickers here
+}
+
+# --- UTILS ---
+def parse_money(value):
+    if isinstance(value, str):
+        return float(value.replace("$", "").replace(",", ""))
+    return float(value)
+
+def fetch_news(ticker, limit=3):
+    url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-01-09&token={FINHUB_API_KEY}"
+    try:
+        resp = requests.get(url)
+        data = resp.json()
+        headlines = [d.get("headline") for d in data[:limit] if d.get("headline")]
+        return " | ".join(headlines) if headlines else "No recent news available."
+    except:
+        return "No recent news available."
+
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        bs = stock.balance_sheet if hasattr(stock, 'balance_sheet') else pd.DataFrame()
-        inc = stock.income_stmt if hasattr(stock, 'income_stmt') else pd.DataFrame()
+        bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
+        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
 
         col = bs.columns[0] if not bs.empty else None
 
@@ -51,7 +67,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             net_incomes = inc.loc["Net Income"].dropna().values
             eps_values = [ni / shares_outstanding for ni in net_incomes if shares_outstanding > 0]
 
-        eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
         if not eps_values:
             eps_values = [info.get("trailingEps", 0)] * 7
 
@@ -67,13 +82,13 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                     eps_growth = (latest - oldest) / oldest
 
         bvps = info.get("bookValue", 0)
-        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
-        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
+        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
+        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
-        current_ratio = info.get("currentRatio", 0)
-        revenue = info.get("totalRevenue", 0)
-        pb_ratio = info.get("priceToBook", 0)
         current_price = info.get("currentPrice", 0)
+        revenue = info.get("totalRevenue", 0)
+        current_ratio = info.get("currentRatio", 0)
+        pb_ratio = info.get("priceToBook", 0)
         dividend_rate = info.get("dividendRate", 0)
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
@@ -88,57 +103,45 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         }
 
         passed = sum(criteria.values())
-        mark = lambda val: "✅" if val else "❌"
+        def mark(val): return "✅" if val else "❌"
 
         return {
             "Ticker": ticker,
+            "Company Name": info.get("shortName", ticker),
+            "Industry": info.get("industry", "N/A"),
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
             "Current Ratio > 2": f"{current_ratio:.2f} {mark(criteria['Current Ratio > 2'])}",
             "CA - L > 0": f"{(est_current_assets - est_total_liabilities):,.0f} {mark(criteria['CA - L > 0'])}",
             "Pays Dividends": f"{dividend_rate:.2f} {mark(criteria['Pays Dividends'])}" if dividend_rate else f"0.00 ❌",
             "Positive EPS for 5Y": f"{'Yes' if criteria['Positive EPS for 5Y'] else 'No'} {mark(criteria['Positive EPS for 5Y'])}",
-            "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if current_price and price_ceiling else f"N/A ❌",
+            "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if current_price and price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
-            "Industry": info.get("industry", "N/A"),
-            "Company Name": info.get("shortName", ticker),
-            "Current Price Num": current_price,
-            "Graham Number Num": graham_number,
-            "Graham Value Num": graham_value,
+            "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
+            "Strength Note": "Current Assets pay all Total Liabilities" if criteria['CA - L > 0'] else "",
+            "Recent News": fetch_news(ticker)
         }
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
 
-# --- Fetch news via Finhub ---
-def fetch_news(ticker):
-    try:
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-01-09&token={FINHUB_API_KEY}"
-        response = requests.get(url)
-        data = response.json()
-        headlines = [d.get("headline") for d in data if "headline" in d]
-        return " | ".join(headlines[:5]) if headlines else "No recent news available."
-    except:
-        return "No recent news available."
-
-# --- User input ---
+# --- INPUT ---
 tickers = []
 manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
 if manual_input:
     tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
 
 uploaded_file = st.file_uploader("Or upload CSV with tickers", type="csv")
-if uploaded_file is not None:
+if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
     tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
 
 tickers = list(set([t for t in tickers if t]))
 
-# --- Run screener ---
+# --- RUN SCREENER ---
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
@@ -155,47 +158,45 @@ if st.button("🚀 Run Screener"):
 
         if results:
             df = pd.DataFrame(results)
-            df_sorted = df.sort_values("Passed Count", ascending=False)
-            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-            st.dataframe(df_sorted[[
-                "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0",
-                "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B",
-                "Passed Count", "Graham Number", "Graham Value"
-            ]])
+            # Table columns
+            table_columns = ["Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0",
+                             "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B",
+                             "Passed Count", "Graham Number", "Graham Value"]
+            st.dataframe(df[table_columns].sort_values("Passed Count", ascending=False))
 
-            # --- Investment Memos ---
+            # --- Investment Memo ---
             st.markdown("### Investment Memos")
             for r in results:
+                ticker = r["Ticker"]
+                company_name = r["Company Name"]
+                industry = r["Industry"]
+                products = products_dict.get(ticker, "N/A")
+                current_price = parse_money(r["Price"])
+                gn_val = r["Graham Number"].split()[0] if r["Graham Number"] != "N/A" else None
+                gv_val = r["Graham Value"].split()[0] if r["Graham Value"] != "N/A" else None
                 try:
-                    gn_val = r["Graham Number Num"]
-                    gv_val = r["Graham Value Num"]
-                    current_price = r["Current Price Num"]
-                    insight = "potentially overvalued" if gn_val and gv_val and current_price > gn_val and current_price > gv_val else "potentially undervalued"
-                    industry = r.get("Industry", "N/A")
-                    company_name = r.get("Company Name", r["Ticker"])
-                    news = fetch_news(r["Ticker"])
-                    strength_note = "Current Assets pay all Total Liabilities."
+                    insight = "potentially overvalued" if (gn_val and gv_val and current_price > float(gn_val) and current_price > float(gv_val)) else "potentially undervalued"
+                except:
+                    insight = "Graham metrics not available"
 
-                    st.markdown(f"**{company_name} ({r['Ticker']})**")
-                    st.markdown(f"- Industry Note: Operates in the {industry} sector. Key products/services: N/A")
-                    st.markdown(f"- Valuation Insight: {company_name} is trading at ${current_price:.2f}, {insight} ❌")
-                    st.markdown(f"- Financial Strength: Earnings consistently positive for last 5 years. Pays regular dividends.")
-                    st.markdown(f"- Screening Rationale: Passed {r['Passed Count']} of 7 Akab screening criteria.")
-                    st.markdown(f"- Strength Note: {strength_note}")
-                    st.markdown(f"- Risk Note: Consider valuation sensitivity, liquidity constraints, and market conditions.")
-                    st.markdown(f"- Recent News: {news}\n")
-                except Exception as e:
-                    st.error(f"Error generating memo for {r['Ticker']}: {e}")
+                memo = f"""
+**{company_name} ({ticker})**
 
-            # --- Download Excel ---
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                df_sorted.to_excel(writer, index=False)
-            st.download_button(
-                label="📥 Download Results as Excel",
-                data=output.getvalue(),
-                file_name="akab_screening_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+Industry Note: Operates in the {industry} sector.
+Key products/services: {products}
+
+Valuation Insight: {company_name} is trading at ${current_price:.2f}, {insight}.
+
+Financial Strength: Earnings consistently positive for last 5 years. Pays regular dividends.
+
+Screening Rationale: Passed {r['Passed Count']} of 7 Akab screening criteria.
+
+Strength Note: {r['Strength Note']}
+
+Risk Note: Consider valuation sensitivity, liquidity constraints, and market conditions.
+
+Recent News: {r['Recent News']}
+"""
+                st.markdown(memo)
         else:
             st.warning("No valid data returned.")
