@@ -8,11 +8,13 @@ import requests
 
 # ======= CONFIG =======
 FINNHUB_API_KEY = "d5gqckpr01qll3dk0t60d5gqckpr01qll3dk0t6g"
+
 st.set_page_config(
     page_title="Akab Stock Screener – Graham-Verified",
     page_icon="📉",
     layout="centered"
 )
+
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value with automated investment memo.")
 
@@ -32,6 +34,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
+
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
@@ -66,10 +69,9 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
             net_incomes = inc.loc["Net Income"].dropna().values
             eps_values = [ni / shares_outstanding for ni in net_incomes if shares_outstanding > 0]
-            eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
+        eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
         if not eps_values:
             eps_values = [info.get("trailingEps", 0)] * 7
-
         eps_7yr_avg = np.mean(eps_values[-7:]) if len(eps_values) >= 3 else np.mean(eps_values)
         eps_5yr_avg = np.mean(eps_values[-5:]) if len(eps_values) >= 3 else np.mean(eps_values)
 
@@ -108,7 +110,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         mark = lambda val: "✅" if val else "❌"
 
-        # Mapping failed criteria to explanations
         criteria_risks = {
             "Revenue > $100M": "Revenue is low; company may lack scale for stability.",
             "Current Ratio > 2": "Liquidity is below safe threshold; company may struggle to meet short-term obligations.",
@@ -118,7 +119,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": "Stock price exceeds 15x 3-year average EPS; potentially overvalued.",
             "P/B < 1.5": "Price-to-Book ratio is high; stock may be overvalued relative to net assets.",
         }
-        failed_criteria = [k for k, v in criteria.items() if v is False]
+        failed_criteria = [k for k, v in criteria.items() if not v]
 
         return {
             "Ticker": ticker,
@@ -131,8 +132,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": graham_number,
-            "Graham Value": graham_value,
+            "Graham Number": f"${graham_number:.2f} ✅" if graham_number else "N/A ❌",
+            "Graham Value": f"${graham_value:.2f} ✅" if graham_value else "N/A ❌",
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
@@ -143,6 +144,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Failed Criteria": failed_criteria,
             "Criteria Risks": criteria_risks,
         }
+
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
@@ -191,37 +193,14 @@ if st.button("🚀 Run Screener"):
 
         if results:
             df = pd.DataFrame(results)
-            # ======= Set Graham tick logic =======
-            def add_graham_ticks(row):
-                price = row["Price"]
-                gn = row["Graham Number"]
-                gv = row["Graham Value"]
-                if gn and gv:
-                    if price > gn and price > gv:
-                        gn_tick = "❌"
-                        gv_tick = "❌"
-                    elif price < gn and price < gv:
-                        gn_tick = "✅"
-                        gv_tick = "✅"
-                    else:
-                        gn_tick = "⚠️"
-                        gv_tick = "⚠️"
-                else:
-                    gn_tick = "N/A ❌"
-                    gv_tick = "N/A ❌"
-                row["Graham Number"] = f"${gn:.2f} {gn_tick}" if gn else gn_tick
-                row["Graham Value"] = f"${gv:.2f} {gv_tick}" if gv else gv_tick
-                return row
-
-            df = df.apply(add_graham_ticks, axis=1)
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
 
             # ======= DISPLAY TABLE =======
             table_cols = [
                 "Ticker", "Price", "Revenue > $100M", "Current Ratio > 2", "CA - L > 0",
-                "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS",
-                "P/B", "Passed Count", "Graham Number", "Graham Value"
+                "Pays Dividends", "Positive EPS for 5Y", "Price ≤ 15x3Y Avg EPS", "P/B",
+                "Passed Count", "Graham Number", "Graham Value"
             ]
             st.dataframe(df_sorted[table_cols])
 
@@ -234,18 +213,43 @@ if st.button("🚀 Run Screener"):
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
 
+                    # Convert numeric Graham values
+                    try:
+                        gn_val = float(r["Graham Number"].split()[0].replace("$",""))
+                    except:
+                        gn_val = None
+                    try:
+                        gv_val = float(r["Graham Value"].split()[0].replace("$",""))
+                    except:
+                        gv_val = None
+                    current_price = r["Price"]
+
+                    # ======= Valuation Insight =======
+                    if gn_val and gv_val:
+                        if current_price > gn_val and current_price > gv_val:
+                            valuation_insight = "potentially overvalued as price above Graham Number and Graham Value"
+                        elif current_price < gn_val and current_price < gv_val:
+                            valuation_insight = "potentially undervalued as price below Graham Number and Graham Value"
+                        else:
+                            valuation_insight = "mixed valuation as price is between Graham Number and Graham Value"
+                    else:
+                        valuation_insight = "valuation data insufficient"
+
                     # ======= Strength Note =======
                     ca = r.get("Current Assets", 0)
                     cl = r.get("Current Liabilities", 0)
                     tl = r.get("Total Liabilities", 0)
                     wc = r.get("Working Capital", 0)
                     cr = r.get("Current Ratio Num", 0)
-                    if ca > tl:
-                        strength_note = "Current Assets can pay all debt"
-                    elif wc >= 0 and cr >= 1 and ca <= tl:
-                        strength_note = "Working capital positive, but Current Assets do not cover total liabilities; leverage risk remains."
+                    if ca > 0 or cl > 0 or tl > 0:
+                        if ca > tl:
+                            strength_note = "Current Assets can pay all debt"
+                        elif wc >= 0 and cr >= 1 and ca <= tl:
+                            strength_note = "Working capital positive, but Current Assets do not cover total liabilities; leverage risk remains."
+                        else:
+                            strength_note = "No material balance sheet item identified"
                     else:
-                        strength_note = "No material balance sheet item identified."
+                        strength_note = "No material balance sheet item identified"
 
                     # ======= Dynamic Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
@@ -259,14 +263,16 @@ if st.button("🚀 Run Screener"):
 
                     news_text = fetch_news(r["Ticker"])
 
-                    st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
-                                f"**Industry Note:** {industry_note}\n\n"
-                                f"**Valuation Insight:** {company_name} is trading at ${r['Price']:.2f}.\n\n"
-                                f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
-                                f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
-                                f"**Strength Note:** {strength_note}\n\n"
-                                f"**Risk Note:** {risk_note}\n\n"
-                                f"**Recent News:** {news_text}\n")
+                    st.markdown(
+                        f"**{company_name} ({r['Ticker']})**\n\n"
+                        f"**Industry Note:** {industry_note}\n\n"
+                        f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
+                        f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
+                        f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
+                        f"**Strength Note:** {strength_note}\n\n"
+                        f"**Risk Note:** {risk_note}\n\n"
+                        f"**Recent News:** {news_text}\n"
+                    )
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
 
