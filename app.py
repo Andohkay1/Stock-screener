@@ -35,25 +35,23 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         stock = yf.Ticker(ticker)
         info = stock.info
         bs = stock.balance_sheet if not stock.balance_sheet.empty else pd.DataFrame()
-        inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
+        inc = stock.income_stmt if not inc.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
         # Current Assets estimate
         est_current_assets = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "CashAndCashEquivalents", "AccountsReceivable", "Inventory", "OtherShortTermInvestments"
-        ]) if col else 0
+        ]) if col else info.get("totalCurrentAssets", 0) or 0
 
         # Total Liabilities estimate
         est_total_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
-        ]) if col else 0
+        ]) if col else info.get("totalLiab", 0) or 0
 
         # Current Liabilities for working capital
         est_current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
-        ]) if col else 0
-        if est_current_liabilities == 0:
-            est_current_liabilities = info.get("currentLiabilities", 0) or 0
+        ]) if col else info.get("currentLiabilities", 0) or 0
 
         # EPS calculations
         eps_values = []
@@ -118,8 +116,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": est_current_assets,
-            "Total Liabilities": est_total_liabilities,
             "Current Liabilities": est_current_liabilities,
+            "Total Liabilities": est_total_liabilities,
             "Current Ratio Num": current_ratio,
         }
 
@@ -201,22 +199,16 @@ if st.button("🚀 Run Screener"):
                         else "mixed valuation as price is below the Graham Number but above the Graham Value"
                     )
 
-                    # Strength Note
-                    est_current_assets = r["Current Assets"]
-                    est_total_liabilities = r["Total Liabilities"]
-                    est_current_liabilities = r["Current Liabilities"]
-                    working_capital = est_current_assets - est_current_liabilities
-                    current_ratio = r["Current Ratio Num"]
+                    # Strength Note (bulletproof)
+                    current_assets = r["Current Assets"] or 0
+                    current_liabilities = r["Current Liabilities"] or 0
+                    total_liabilities = r["Total Liabilities"] or 0
+                    working_capital = current_assets - current_liabilities
 
-                    if est_current_assets >= est_total_liabilities:
-                        if current_ratio >= 2:
-                            strength_note = "Current Assets can pay all debt. Current Ratio healthy."
-                        elif current_ratio >= 1.5:
-                            strength_note = "Current Assets can pay all debt. Current Ratio moderate."
-                        else:
-                            strength_note = "Current Assets can pay all debt. Current Ratio below ideal, but acceptable."
+                    if current_assets >= total_liabilities:
+                        strength_note = "Current Assets can pay all debt; liquidity healthy."
                     elif working_capital >= 0:
-                        strength_note = "Working capital positive, but Current Assets do not cover total debt."
+                        strength_note = "Working capital positive; Current Assets do not cover all debt."
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
 
