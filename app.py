@@ -133,50 +133,79 @@ def fetch_news(symbol):
     return "No recent news."
 
 # ================= INPUT =================
-tickers = st.text_area("Enter tickers (comma separated)").upper().split(",")
+tickers = []
 
+manual_input = st.text_area("Enter tickers separated by commas (e.g., AAPL, MSFT, TSLA)")
+if manual_input:
+    tickers.extend([t.strip().upper() for t in manual_input.split(",") if t.strip()])
+
+uploaded_file = st.file_uploader("Or upload CSV with tickers", type="csv")
+if uploaded_file is not None:
+    df_upload = pd.read_csv(uploaded_file)
+    tickers.extend(df_upload.iloc[:, 0].dropna().tolist())
+
+tickers = list(set([t for t in tickers if t]))
+
+# ================= RUN SCREEN =================
 if st.button("🚀 Run Screener"):
-    results = []
-    for t in tickers:
-        t = t.strip()
-        if t:
+    if not tickers:
+        st.warning("Please enter or upload at least one ticker.")
+    else:
+        results = []
+        progress = st.progress(0)
+        for idx, t in enumerate(tickers):
+            time.sleep(0.5)
             data = fetch_financials(t)
             if data:
                 results.append(data)
+            progress.progress((idx + 1) / len(tickers))
 
-    df = pd.DataFrame(results).sort_values("Passed Count", ascending=False)
+        if results:
+            df = pd.DataFrame(results).sort_values("Passed Count", ascending=False)
 
-    st.success(f"Screened {len(df)} tickers")
+            # ===== DISPLAY TABLE =====
+            table_cols = [
+                "Ticker", "Price", "Passed Count", "Graham Number", "Graham Value",
+                "Current Assets", "Current Liabilities", "Total Liabilities", "Working Capital", "Current Ratio Num"
+            ]
+            st.dataframe(df[table_cols])
 
-    # ================= MEMOS =================
-    st.markdown("## Investment Memos")
+            # ===== DOWNLOAD BUTTON =====
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df.to_excel(writer, index=False)
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=output.getvalue(),
+                file_name="akab_screening_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-    for _, r in df.iterrows():
-        ca = r["Current Assets"]
-        tl = r["Total Liabilities"]
-        wc = r["Working Capital"]
-        cr = r["Current Ratio Num"]
+            # ===== MEMOS =====
+            st.markdown("## Investment Memos")
+            for _, r in df.iterrows():
+                ca = r["Current Assets"]
+                tl = r["Total Liabilities"]
+                wc = r["Working Capital"]
+                cr = r["Current Ratio Num"]
 
-        # ---- Strength ----
-        strength_note = "No material balance sheet strength identified."
-        if ca > tl:
-            strength_note = "Current Assets fully cover total liabilities; strong balance sheet."
+                # ---- Strength ----
+                strength_note = "No material balance sheet strength identified."
+                if ca > tl:
+                    strength_note = "Current Assets fully cover total liabilities; strong balance sheet."
 
-        # ---- Risk ----
-        risk_notes = []
+                # ---- Risk ----
+                risk_notes = []
+                if wc < 0:
+                    risk_notes.append("Working capital negative; liquidity may be tight.")
+                elif ca <= tl and wc >= 0 and cr >= 1:
+                    risk_notes.append("Working capital positive, but assets do not cover liabilities.")
+                for f in r["Failed Criteria"]:
+                    risk_notes.append(r["Criteria Risks"][f])
+                risk_note = "; ".join(set(risk_notes)) if risk_notes else "No major risks identified."
 
-        if wc < 0:
-            risk_notes.append("Working capital negative; liquidity may be tight.")
-        elif ca <= tl and wc >= 0 and cr >= 1:
-            risk_notes.append("Working capital positive, but assets do not cover liabilities.")
-
-        for f in r["Failed Criteria"]:
-            risk_notes.append(r["Criteria Risks"][f])
-
-        risk_note = "; ".join(set(risk_notes)) if risk_notes else "No major risks identified."
-
-        st.markdown(
-            f"""
+                st.markdown(
+                    f"""
 **{r['Company Name']} ({r['Ticker']})**
 
 **Industry:** {r['Industry']}
@@ -187,4 +216,6 @@ if st.button("🚀 Run Screener"):
 
 **Recent News:** {fetch_news(r['Ticker'])}
 """
-        )
+                )
+        else:
+            st.warning("No valid data returned.")
