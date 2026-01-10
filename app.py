@@ -31,11 +31,6 @@ industry_products = {
 }
 
 # ======= HELPER FUNCTIONS =======
-def parse_money(value):
-    if isinstance(value, str):
-        return float(value.replace("$", "").replace(",", ""))
-    return value
-
 def fetch_financials(ticker, current_bond_yield=4.4):
     try:
         stock = yf.Ticker(ticker)
