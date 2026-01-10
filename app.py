@@ -49,10 +49,14 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
         ]) if col else 0
 
-        # Current Liabilities only (for working capital check)
+        # Current Liabilities (for working capital)
         est_current_liabilities = sum(bs.loc[key, col] if key in bs.index else 0 for key in [
             "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
         ]) if col else 0
+
+        # fallback to info if missing
+        if est_current_liabilities == 0:
+            est_current_liabilities = info.get("currentLiabilities", 0) or 0
 
         # EPS calculations
         eps_values = []
@@ -207,10 +211,10 @@ if st.button("🚀 Run Screener"):
                     )
 
                     # ===== Strength Note =====
-                    est_current_assets = r["Current Assets"]
-                    est_total_liabilities = r["Total Liabilities"]
-                    current_ratio = r["Current Ratio Num"]
-                    est_current_liabilities = r["Current Liabilities"]
+                    est_current_assets = r["Current Assets"] or 0
+                    est_total_liabilities = r["Total Liabilities"] or 0
+                    current_ratio = r["Current Ratio Num"] or 0
+                    est_current_liabilities = r.get("Current Liabilities", 0) or 0
 
                     working_capital_current = est_current_assets - est_current_liabilities
 
