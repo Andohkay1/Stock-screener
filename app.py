@@ -14,6 +14,12 @@ st.set_page_config(
 st.title("Akab Stock Screener")
 st.markdown("Uses verified EPS logic for Graham Number and Value.")
 
+# ---------------- SESSION STATE ----------------
+if "results" not in st.session_state:
+    st.session_state["results"] = []
+if "memo_data" not in st.session_state:
+    st.session_state["memo_data"] = []
+
 # ---------------- FETCH FINANCIALS ----------------
 @st.cache_data(ttl=3600)
 def fetch_financials(ticker, current_bond_yield=4.4):
@@ -89,8 +95,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "current_ratio": current_ratio
         }
 
-        # Return full dict including extra info for memos
-        return {
+        table_data = {
             "Ticker": ticker,
             "Price": f"${current_price:.2f}" if current_price else "N/A",
             "Revenue > $100M": f"{revenue:,} {mark(criteria['Revenue > $100M'])}",
@@ -102,13 +107,20 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "P/B < 1.5": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
             "Graham Number": f"${graham_number:.2f} {mark(current_price < graham_number)}" if not np.isnan(graham_number) and current_price else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A",
-            "metrics": metrics,      # For memo
-            "criteria": criteria,    # For memo
+            "Graham Value": f"${graham_value:.2f} {mark(current_price < graham_value)}" if not np.isnan(graham_value) and current_price else "N/A"
+        }
+
+        # Keep full data for memo
+        full_data = {
+            **table_data,
+            "metrics": metrics,
+            "criteria": criteria,
             "eps_values": eps_values,
             "eps_growth": eps_growth,
             "bvps": bvps
         }
+
+        return full_data
 
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
@@ -155,7 +167,6 @@ def generate_stock_notes(ticker, metrics, criteria, passed):
         risk_notes.append("cyclical sector exposure")
     risk_text = "Key considerations include " + ", ".join(risk_notes) + "." if risk_notes else ""
 
-    # Compile
     summary = f"{short_business}\n\nValuation Insight: {valuation_text}\n\nFinancial Strength: {fs_text}\n\nScreening Rationale: {screening_text}\n\nRisk Note: {risk_text}"
     return summary
 
@@ -172,46 +183,46 @@ if uploaded_file is not None:
 
 tickers = list(set([t for t in tickers if t]))
 
+# ---------------- RUN SCREENER ----------------
 if st.button("🚀 Run Screener"):
     if not tickers:
         st.warning("Please enter or upload at least one ticker.")
     else:
         with st.spinner("Running screen..."):
-            results = []
-            memo_data = []  # Keep full dicts for memos
+            st.session_state["results"] = []
+            st.session_state["memo_data"] = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
-                time.sleep(1.5)  # Delay to avoid rate limiting
+                time.sleep(1.5)
                 data = fetch_financials(t)
                 if data:
-                    # Only keep fields for table
-                    table_data = {k: v for k, v in data.items() if k not in ["metrics", "criteria", "eps_values", "eps_growth", "bvps"]}
-                    results.append(table_data)
-                    memo_data.append(data)  # full dict for memos
-                progress.progress((idx + 1) / len(tickers))
+                    st.session_state["results"].append({k: v for k, v in data.items() if k not in ["metrics","criteria","eps_values","eps_growth","bvps"]})
+                    st.session_state["memo_data"].append(data)
+                progress.progress((idx + 1)/len(tickers))
 
-        if results:
-            df = pd.DataFrame(results)
-            df_sorted = df.sort_values("Passed Count", ascending=False)
-            st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
-            st.dataframe(df_sorted)
+# ---------------- DISPLAY TABLE ----------------
+if st.session_state["results"]:
+    df = pd.DataFrame(st.session_state["results"])
+    df_sorted = df.sort_values("Passed Count", ascending=False)
+    st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
+    st.dataframe(df_sorted)
 
-            # ---- INVESTMENT NOTES ----
-            st.markdown("### 📌 Investment Notes (Akab Model)")
-            if st.checkbox("Show Investment Memos"):
-                for stock_data in memo_data:
-                    summary = generate_stock_notes(
-                        stock_data["Ticker"],
-                        stock_data["metrics"],
-                        stock_data["criteria"],
-                        stock_data["Passed Count"]
-                    )
-                    with st.expander(f"{stock_data['Ticker']} – Investment Summary"):
-                        st.write(summary)
+# ---------------- INVESTMENT MEMOS ----------------
+st.markdown("### 📌 Investment Notes (Akab Model)")
+if st.checkbox("Show Investment Memos"):
+    for stock_data in st.session_state["memo_data"]:
+        summary = generate_stock_notes(
+            stock_data["Ticker"],
+            stock_data["metrics"],
+            stock_data["criteria"],
+            stock_data["Passed Count"]
+        )
+        with st.expander(f"{stock_data['Ticker']} – Investment Summary"):
+            st.write(summary)
 
-            # ---- UNDERSTANDING RESULTS ----
-            st.markdown("### Understanding Your Results – Akab Model")
-            st.markdown("""
+# ---------------- UNDERSTANDING RESULTS ----------------
+st.markdown("### Understanding Your Results – Akab Model")
+st.markdown("""
 The results above reflect each company’s performance against the Akab Model’s 7 screening criteria, based on principles from Benjamin Graham’s value investing framework.
 
 ✅ A green check means the company meets that criterion.  
@@ -223,16 +234,14 @@ The **Graham Number** and **Graham Value** provide benchmarks for fair valuation
 Use this as a signal to explore further. The model highlights opportunities, but investment decisions should follow deeper analysis.
 """)
 
-            # ---- EXPORT EXCEL ----
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                df_sorted.to_excel(writer, index=False)
-
-            st.download_button(
-                label="📥 Download Results as Excel",
-                data=output.getvalue(),
-                file_name="akab_screening_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.warning("No valid data returned.")
+# ---------------- EXPORT EXCEL ----------------
+if st.session_state["results"]:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df_sorted.to_excel(writer, index=False)
+    st.download_button(
+        label="📥 Download Results as Excel",
+        data=output.getvalue(),
+        file_name="akab_screening_results.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
