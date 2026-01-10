@@ -79,7 +79,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
 
         # Screening metrics
-        current_ratio = info.get("currentRatio", 0)
+        current_ratio = info.get("currentRatio", 0) or (current_assets / current_liabilities if current_liabilities else 0)
         revenue = info.get("totalRevenue", 0)
         pb_ratio = info.get("priceToBook", 0)
         current_price = info.get("currentPrice", 0)
@@ -113,10 +113,10 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Graham Value": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
-            "Current Assets": current_assets,
-            "Current Liabilities": current_liabilities,
-            "Total Liabilities": total_liabilities,
-            "Current Ratio Num": current_ratio,
+            "Current Assets": float(current_assets or 0),
+            "Current Liabilities": float(current_liabilities or 0),
+            "Total Liabilities": float(total_liabilities or 0),
+            "Current Ratio Num": float(current_ratio or 0),
         }
 
     except Exception as e:
@@ -198,9 +198,9 @@ if st.button("🚀 Run Screener"):
                     )
 
                     # ======= Strength Note =======
-                    ca = r["Current Assets"] or 0
-                    cl = r["Current Liabilities"] or 0
-                    tl = r["Total Liabilities"] or 0
+                    ca = float(r.get("Current Assets", 0) or 0)
+                    cl = float(r.get("Current Liabilities", 0) or 0)
+                    tl = float(r.get("Total Liabilities", 0) or 0)
                     wc = ca - cl
 
                     if ca >= tl:
