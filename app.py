@@ -53,6 +53,10 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "TotalDebt", "AccountsPayable", "OtherCurrentLiabilities", "TaxPayable"
         ]) if col else 0
 
+        # Ensure numeric
+        est_current_assets = float(est_current_assets) if est_current_assets is not None else 0
+        est_total_liabilities = float(est_total_liabilities) if est_total_liabilities is not None else 0
+
         # EPS calculations
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
@@ -77,15 +81,15 @@ def fetch_financials(ticker, current_bond_yield=4.4):
                     eps_growth = (latest - oldest) / oldest
 
         bvps = info.get("bookValue", 0)
-        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else None
-        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else None
+        graham_number = np.sqrt(22.5 * eps_7yr_avg * bvps) if eps_7yr_avg > 0 and bvps > 0 else np.nan
+        graham_value = eps_5yr_avg * (8.5 + 2 * eps_growth) * (4.4 / current_bond_yield) if eps_5yr_avg > 0 else np.nan
 
         # Screening metrics
-        current_ratio = info.get("currentRatio", 0)
-        revenue = info.get("totalRevenue", 0)
-        pb_ratio = info.get("priceToBook", 0)
-        current_price = info.get("currentPrice", 0)
-        dividend_rate = info.get("dividendRate", 0)
+        current_ratio = info.get("currentRatio", 0) or 0
+        revenue = info.get("totalRevenue", 0) or 0
+        pb_ratio = info.get("priceToBook", 0) or 0
+        current_price = info.get("currentPrice", 0) or 0
+        dividend_rate = info.get("dividendRate", 0) or 0
         price_ceiling = 15 * eps_5yr_avg if eps_5yr_avg > 0 else 0
 
         criteria = {
@@ -112,8 +116,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
+            "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if not np.isnan(graham_number) else "N/A",
+            "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if not np.isnan(graham_value) else "N/A",
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": est_current_assets,
@@ -191,9 +195,32 @@ if st.button("🚀 Run Screener"):
                     current_price = r["Current Price Num"]
                     gn_val = r["Graham Number Num"]
                     gv_val = r["Graham Value Num"]
-                    valuation_insight = ( "potentially overvalued as price above graham value and number" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)else "potentially undervalued as price below graham value and number" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val) else "mixed valuation as price is above Graham Number but below Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price < gv_val) else "mixed valuation as price is below the Graham Number but above the Graham Value")
 
-                    strength_note = "Current Assets pay all Total Liabilities."
+                    # ===== VALUATION INSIGHT =====
+                    if gn_val is None or gv_val is None or np.isnan(gn_val) or np.isnan(gv_val):
+                        valuation_insight = "insufficient data for valuation"
+                    else:
+                        if current_price > gn_val and current_price > gv_val:
+                            valuation_insight = "potentially overvalued as price above Graham Number and Value"
+                        elif current_price < gn_val and current_price < gv_val:
+                            valuation_insight = "potentially undervalued as price below Graham Number and Value"
+                        elif current_price > gn_val and current_price < gv_val:
+                            valuation_insight = "mixed valuation: price above Graham Number but below Graham Value"
+                        else:
+                            valuation_insight = "mixed valuation: price below Graham Number but above Graham Value"
+
+                    # ===== STRENGTH NOTE =====
+                    current_assets = r.get("Current Assets", 0)
+                    total_liabilities = r.get("Total Liabilities", 0)
+                    if current_assets is None or total_liabilities is None or np.isnan(current_assets) or np.isnan(total_liabilities):
+                        strength_note = "Insufficient data for strength check"
+                    elif current_assets > total_liabilities * 1.2:
+                        strength_note = "Strong liquidity: Current Assets comfortably cover Total Liabilities"
+                    elif current_assets >= total_liabilities:
+                        strength_note = "Adequate liquidity: Current Assets pay all Total Liabilities"
+                    else:
+                        strength_note = "Weak liquidity: Current Assets do not cover Total Liabilities"
+
                     news_text = fetch_news(r["Ticker"])
 
                     st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
