@@ -114,15 +114,15 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         # Mapping failed criteria to explanations
         criteria_risks = {
             "Revenue > $100M": "Revenue is low; company may lack scale for stability.",
-            "Current Ratio > 2": "Current Ratio is low; liquidity may be a concern.",
+            "Current Ratio > 2": "Liquidity is below safe threshold; company may struggle to meet short-term obligations.",
             "CA - L > 0": "Current Assets do not cover total liabilities; liquidity risk.",
             "Pays Dividends": "Does not pay dividends; may indicate weaker shareholder returns or cash allocation priorities.",
             "Positive EPS for 5Y": "Earnings are inconsistent; profitability risk exists.",
-            "Price ≤ 15x3Y Avg EPS": "Price exceeds 15x 3-year EPS; potentially overvalued.",
-            "P/B < 1.5": "Price-to-Book ratio high; stock may be overvalued relative to net assets.",
+            "Price ≤ 15x3Y Avg EPS": "Stock price exceeds 15x 3-year average EPS; potentially overvalued.",
+            "P/B < 1.5": "Price-to-Book ratio is high; stock may be overvalued relative to net assets.",
         }
 
-        failed_criteria = [k for k, v in criteria.items() if not v]
+        failed_criteria = [k for k, v in criteria.items() if v is False]
 
         return {
             "Ticker": ticker,
@@ -135,17 +135,17 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} {mark(current_price <= graham_number)}" if graham_number else "N/A",
-            "Graham Value": f"${graham_value:.2f} {mark(current_price <= graham_value)}" if graham_value else "N/A",
+            "Graham Number": f"${graham_number:.2f} ✅" if graham_number else "N/A ❌",
+            "Graham Value": f"${graham_value:.2f} ✅" if graham_value else "N/A ❌",
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
             "Current Liabilities": current_liabilities,
             "Total Liabilities": total_liabilities,
+            "Current Ratio Num": current_ratio,
             "Working Capital": working_capital,
             "Failed Criteria": failed_criteria,
             "Criteria Risks": criteria_risks,
-            "Current Ratio Num": current_ratio,
         }
 
     except Exception as e:
@@ -187,7 +187,7 @@ if st.button("🚀 Run Screener"):
             results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
-                time.sleep(1.2)
+                time.sleep(1)
                 data = fetch_financials(t)
                 if data:
                     results.append(data)
@@ -215,13 +215,17 @@ if st.button("🚀 Run Screener"):
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
 
+                    # Convert numeric values
+                    current_price = float(r["Price"])
+                    gn_val = float(r["Graham Number"].replace("$","").replace("✅","")) if r["Graham Number"] not in [None,"N/A"] else None
+                    gv_val = float(r["Graham Value"].replace("$","").replace("✅","")) if r["Graham Value"] not in [None,"N/A"] else None
+
                     # Valuation insight
-                    current_price = r["Price"]
-                    gn_val = r["Graham Number"]
-                    gv_val = r["Graham Value"]
                     valuation_insight = (
-                        "potentially overvalued as price above Graham Number and Graham Value" if (gn_val and gv_val and current_price > gn_val and current_price > gv_val)
-                        else "potentially undervalued as price below Graham Number and Graham Value" if (gn_val and gv_val and current_price < gn_val and current_price < gv_val)
+                        "potentially overvalued as price above Graham Number and Graham Value"
+                        if gn_val and gv_val and current_price > gn_val and current_price > gv_val
+                        else "potentially undervalued as price below Graham Number and Graham Value"
+                        if gn_val and gv_val and current_price < gn_val and current_price < gv_val
                         else "mixed valuation as price is between Graham Number and Graham Value"
                     )
 
@@ -230,22 +234,22 @@ if st.button("🚀 Run Screener"):
                     cl = r.get("Current Liabilities", 0)
                     tl = r.get("Total Liabilities", 0)
                     wc = r.get("Working Capital", 0)
-                    current_ratio = r.get("Current Ratio Num", 0)
+                    cr = r.get("Current Ratio Num", 0)
 
-                    if ca > tl and current_ratio >= 1:
+                    if ca > tl:
                         strength_note = "Current Assets can pay all debt; liquidity healthy."
-                    elif wc >= 0 and current_ratio >= 1:
-                        strength_note = "Working capital positive; Current Assets do not cover total debt."
+                    elif wc >= 0 and cr >= 1:
+                        strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity acceptable."
                     else:
                         strength_note = "Working capital negative; liquidity may be tight."
 
-                    # ======= Risk Note =======
+                    # ======= Dynamic Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
                     criteria_risks = r.get("Criteria Risks", {})
-
-                    # Include all red metrics including liquidity issues
-                    if failed_criteria:
-                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in failed_criteria]) + ". Consider market conditions."
+                    risk_exclude = ["Current Ratio > 2", "CA - L > 0"]
+                    filtered_failed = [c for c in failed_criteria if c not in risk_exclude]
+                    if filtered_failed:
+                        risk_note = "Potential risks: " + "; ".join([criteria_risks[k] for k in filtered_failed]) + ". Consider market conditions."
                     else:
                         risk_note = "No major screening risks identified. Consider general market conditions."
 
