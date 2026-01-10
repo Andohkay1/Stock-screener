@@ -237,11 +237,11 @@ if st.button("🚀 Run Screener"):
                     cr = r.get("Current Ratio Num", 0)
 
                     if ca > tl:
-                        strength_note = "Current Assets can pay all debt; liquidity healthy."
+                        strength_note = "Current Assets can pay all debt"
                     elif wc >= 0 and cr >= 1:
-                        strength_note = "Working capital positive; Current Assets do not cover total debt; liquidity acceptable."
+                        risk_note = "Working capital positive; Current Assets do not cover total debt; liquidity acceptable."
                     else:
-                        strength_note = "Working capital negative; liquidity may be tight."
+                        risk_note = "Working capital negative; liquidity may be tight."
 
                     # ======= Dynamic Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
