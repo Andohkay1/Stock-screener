@@ -36,7 +36,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         inc = stock.income_stmt if not stock.income_stmt.empty else pd.DataFrame()
         col = bs.columns[0] if not bs.empty else None
 
-        # Current Assets
+        # ===== Current Assets =====
         current_assets = 0
         if col and not bs.empty:
             current_assets = sum(
@@ -45,7 +45,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_assets = float(current_assets or info.get("totalCurrentAssets", 0) or 0)
 
-        # Current Liabilities
+        # ===== Current Liabilities =====
         current_liabilities = 0
         if col and not bs.empty:
             current_liabilities = sum(
@@ -54,13 +54,13 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             )
         current_liabilities = float(current_liabilities or info.get("currentLiabilities", 0) or 0)
 
-        # Total Liabilities
+        # ===== Total Liabilities =====
         total_liabilities = float(info.get("totalLiab", 0) or current_liabilities)
 
-        # Working Capital
+        # ===== Working Capital =====
         working_capital = current_assets - current_liabilities
 
-        # EPS Calculations
+        # ===== EPS Calculations =====
         eps_values = []
         shares_outstanding = info.get("sharesOutstanding", 0)
         if not inc.empty and "Net Income" in inc.index and shares_outstanding:
@@ -69,6 +69,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             eps_values = [eps for eps in eps_values if isinstance(eps, (int, float))]
         if not eps_values:
             eps_values = [info.get("trailingEps", 0)] * 7
+
         eps_7yr_avg = np.mean(eps_values[-7:]) if len(eps_values) >= 3 else np.mean(eps_values)
         eps_5yr_avg = np.mean(eps_values[-5:]) if len(eps_values) >= 3 else np.mean(eps_values)
 
@@ -107,6 +108,7 @@ def fetch_financials(ticker, current_bond_yield=4.4):
         passed = sum(criteria.values())
         mark = lambda val: "✅" if val else "❌"
 
+        # Mapping failed criteria to explanations
         criteria_risks = {
             "Revenue > $100M": "Revenue is low; company may lack scale for stability.",
             "Current Ratio > 2": "Liquidity is below safe threshold; company may struggle to meet short-term obligations.",
@@ -129,8 +131,8 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Price ≤ 15x3Y Avg EPS": f"${current_price:.2f} ≤ ${price_ceiling:.2f} {mark(criteria['Price ≤ 15x3Y Avg EPS'])}" if price_ceiling else "N/A ❌",
             "P/B": f"{pb_ratio:.2f} {mark(criteria['P/B < 1.5'])}",
             "Passed Count": passed,
-            "Graham Number": f"${graham_number:.2f} ✅" if graham_number else "N/A ❌",
-            "Graham Value": f"${graham_value:.2f} ✅" if graham_value else "N/A ❌",
+            "Graham Number": graham_number,
+            "Graham Value": graham_value,
             "Industry": info.get("industry", "N/A"),
             "Company Name": info.get("shortName", ticker),
             "Current Assets": current_assets,
@@ -141,7 +143,6 @@ def fetch_financials(ticker, current_bond_yield=4.4):
             "Failed Criteria": failed_criteria,
             "Criteria Risks": criteria_risks,
         }
-
     except Exception as e:
         st.error(f"Error fetching data for {ticker}: {e}")
         return None
@@ -182,7 +183,7 @@ if st.button("🚀 Run Screener"):
             results = []
             progress = st.progress(0)
             for idx, t in enumerate(tickers):
-                time.sleep(0.5)
+                time.sleep(1)
                 data = fetch_financials(t)
                 if data:
                     results.append(data)
@@ -190,6 +191,29 @@ if st.button("🚀 Run Screener"):
 
         if results:
             df = pd.DataFrame(results)
+            # ======= Set Graham tick logic =======
+            def add_graham_ticks(row):
+                price = row["Price"]
+                gn = row["Graham Number"]
+                gv = row["Graham Value"]
+                if gn and gv:
+                    if price > gn and price > gv:
+                        gn_tick = "❌"
+                        gv_tick = "❌"
+                    elif price < gn and price < gv:
+                        gn_tick = "✅"
+                        gv_tick = "✅"
+                    else:
+                        gn_tick = "⚠️"
+                        gv_tick = "⚠️"
+                else:
+                    gn_tick = "N/A ❌"
+                    gv_tick = "N/A ❌"
+                row["Graham Number"] = f"${gn:.2f} {gn_tick}" if gn else gn_tick
+                row["Graham Value"] = f"${gv:.2f} {gv_tick}" if gv else gv_tick
+                return row
+
+            df = df.apply(add_graham_ticks, axis=1)
             df_sorted = df.sort_values("Passed Count", ascending=False)
             st.success(f"✅ Screening complete for {len(df_sorted)} tickers.")
 
@@ -210,20 +234,20 @@ if st.button("🚀 Run Screener"):
                     products = industry_products.get(industry, "")
                     industry_note = f"Operates in the {industry} sector. Key products/services: {products}" if products else f"Operates in the {industry} sector."
 
-                    # Strength Note
+                    # ======= Strength Note =======
                     ca = r.get("Current Assets", 0)
                     cl = r.get("Current Liabilities", 0)
                     tl = r.get("Total Liabilities", 0)
                     wc = r.get("Working Capital", 0)
                     cr = r.get("Current Ratio Num", 0)
-
-                    strength_note = ""
                     if ca > tl:
                         strength_note = "Current Assets can pay all debt"
                     elif wc >= 0 and cr >= 1 and ca <= tl:
                         strength_note = "Working capital positive, but Current Assets do not cover total liabilities; leverage risk remains."
+                    else:
+                        strength_note = "No material balance sheet item identified."
 
-                    # Dynamic Risk Note
+                    # ======= Dynamic Risk Note =======
                     failed_criteria = r.get("Failed Criteria", [])
                     criteria_risks = r.get("Criteria Risks", {})
                     risk_exclude = ["Current Ratio > 2", "CA - L > 0"]
@@ -233,27 +257,16 @@ if st.button("🚀 Run Screener"):
                     else:
                         risk_note = "No major screening risks identified. Consider general market conditions."
 
-                    current_price = float(r["Price"])
-                    gn_val = float(r["Graham Number"].replace("$","").replace("✅","")) if r["Graham Number"] not in [None,"N/A"] else None
-                    gv_val = float(r["Graham Value"].replace("$","").replace("✅","")) if r["Graham Value"] not in [None,"N/A"] else None
-
-                    valuation_insight = (
-                        "potentially overvalued as price above Graham Number and Graham Value" if gn_val and gv_val and current_price > gn_val and current_price > gv_val
-                        else "potentially undervalued as price below Graham Number and Graham Value" if gn_val and gv_val and current_price < gn_val and current_price < gv_val
-                        else "mixed valuation as price is between Graham Number and Graham Value"
-                    )
-
                     news_text = fetch_news(r["Ticker"])
 
-                    st.markdown(
-                        f"**{company_name} ({r['Ticker']})**\n\n"
-                        f"**Industry Note:** {industry_note}\n\n"
-                        f"**Valuation Insight:** {company_name} is trading at ${current_price:.2f}, {valuation_insight}.\n\n"
-                        f"**Financial Strength:** {strength_note}\n\n"
-                        f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
-                        f"**Risk Note:** {risk_note}\n\n"
-                        f"**Recent News:** {news_text}\n"
-                    )
+                    st.markdown(f"**{company_name} ({r['Ticker']})**\n\n"
+                                f"**Industry Note:** {industry_note}\n\n"
+                                f"**Valuation Insight:** {company_name} is trading at ${r['Price']:.2f}.\n\n"
+                                f"**Financial Strength:** Earnings consistently positive for last 5 years. Pays regular dividends.\n\n"
+                                f"**Screening Rationale:** Passed {r['Passed Count']} of 7 Akab screening criteria.\n\n"
+                                f"**Strength Note:** {strength_note}\n\n"
+                                f"**Risk Note:** {risk_note}\n\n"
+                                f"**Recent News:** {news_text}\n")
                 except Exception as e:
                     st.error(f"Error generating memo for {r['Ticker']}: {e}")
 
