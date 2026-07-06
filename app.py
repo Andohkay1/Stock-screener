@@ -50,33 +50,118 @@ def clean_symbol(symbol):
 @st.cache_data(ttl=60 * 30)
 def get_yahoo_market_list(list_type="52-week-lows", max_tickers=100):
     """
-    Pull tickers from Yahoo Finance market lists.
+    Pull tickers from Yahoo Finance 52-week lists.
 
-    Default source is Yahoo Finance 52-week lows because Akab is designed
-    to identify potentially undervalued stocks that have lost value.
+    This function uses several methods because Yahoo Finance changes its pages
+    often and sometimes blocks simple HTML table reads.
+
+    Order used:
+    1. Yahoo predefined screener API using multiple known screener IDs
+    2. Yahoo market-list page embedded JSON symbols
+    3. Yahoo market-list page HTML tables
     """
-    yahoo_urls = {
-        "52-week-lows": "https://finance.yahoo.com/markets/stocks/52-week-lows/",
-        "52-week-highs": "https://finance.yahoo.com/markets/stocks/52-week-highs/",
-    }
-
-    if list_type not in yahoo_urls:
+    if list_type not in {"52-week-lows", "52-week-highs"}:
         raise ValueError("list_type must be either '52-week-lows' or '52-week-highs'")
 
-    url = yahoo_urls[list_type]
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0 Safari/537.36"
-        )
+        ),
+        "Accept": "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
-    tickers = []
+    yahoo_urls = {
+        "52-week-lows": "https://finance.yahoo.com/markets/stocks/52-week-lows/",
+        "52-week-highs": "https://finance.yahoo.com/markets/stocks/52-week-highs/",
+    }
 
-    # Primary method: read the Yahoo Finance market-list table.
+    # These names have changed over time, so keep several candidates.
+    # The most important additions are fifty_two_wk_losers and fifty_two_wk_gainers.
+    fallback_scr_ids = {
+        "52-week-lows": [
+            "fifty_two_wk_losers",
+            "fifty_two_wk_lows",
+            "52_week_lows",
+            "fifty_two_week_lows",
+            "fifty_two_week_losers",
+        ],
+        "52-week-highs": [
+            "fifty_two_wk_gainers",
+            "fifty_two_wk_highs",
+            "52_week_highs",
+            "fifty_two_week_highs",
+            "fifty_two_week_gainers",
+        ],
+    }
+
+    def dedupe(symbols):
+        unique = []
+        seen = set()
+        for symbol in symbols:
+            symbol = clean_symbol(symbol)
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                unique.append(symbol)
+        return unique[:max_tickers]
+
+    def symbols_from_quotes(quotes):
+        return dedupe([q.get("symbol") for q in quotes if isinstance(q, dict)])
+
+    # Method 1: Yahoo Finance predefined screener API.
+    # Try query2 first, then query1. Some networks prefer one over the other.
+    for domain in ["query2.finance.yahoo.com", "query1.finance.yahoo.com"]:
+        for scr_id in fallback_scr_ids[list_type]:
+            try:
+                api_url = (
+                    f"https://{domain}/v1/finance/screener/predefined/saved"
+                    f"?formatted=false&lang=en-US&region=US&count={int(max_tickers)}&scrIds={scr_id}"
+                )
+                resp = requests.get(api_url, headers=headers, timeout=20)
+                if resp.status_code != 200:
+                    continue
+
+                data = resp.json()
+                result = data.get("finance", {}).get("result", [])
+                if not result:
+                    continue
+
+                quotes = result[0].get("quotes", [])
+                tickers = symbols_from_quotes(quotes)
+                if tickers:
+                    return tickers
+            except Exception:
+                continue
+
+    # Method 2: Yahoo market page embedded JSON. This works when Yahoo renders
+    # data in script tags instead of plain HTML tables.
     try:
-        response = requests.get(url, headers=headers, timeout=20)
+        page_url = yahoo_urls[list_type]
+        response = requests.get(page_url, headers=headers, timeout=20)
+        if response.status_code == 200:
+            html = response.text
+
+            # Pull ticker-looking values from embedded JSON: "symbol":"AAPL"
+            symbols = re.findall(r'"symbol"\s*:\s*"([A-Z0-9.\-]{1,12})"', html)
+            tickers = dedupe(symbols)
+            if tickers:
+                return tickers
+
+            # Some pages encode quotes differently.
+            symbols = re.findall(r'"ticker"\s*:\s*"([A-Z0-9.\-]{1,12})"', html)
+            tickers = dedupe(symbols)
+            if tickers:
+                return tickers
+    except Exception:
+        pass
+
+    # Method 3: HTML table read. Kept as a final fallback because the new Yahoo
+    # market pages often do not include normal static tables.
+    try:
+        page_url = yahoo_urls[list_type]
+        response = requests.get(page_url, headers=headers, timeout=20)
         response.raise_for_status()
         tables = pd.read_html(io.StringIO(response.text))
 
@@ -90,47 +175,13 @@ def get_yahoo_market_list(list_type="52-week-lows", max_tickers=100):
                     break
 
             if symbol_col is not None:
-                tickers = [clean_symbol(s) for s in table[symbol_col].tolist()]
-                tickers = [t for t in tickers if t]
-                break
-    except Exception:
-        tickers = []
-
-    # Fallback method: try Yahoo's predefined screener endpoint.
-    # Yahoo sometimes changes page HTML, so this gives the app another path.
-    if not tickers:
-        fallback_scr_ids = {
-            "52-week-lows": ["52_week_lows", "fifty_two_wk_lows"],
-            "52-week-highs": ["52_week_highs", "fifty_two_wk_highs"],
-        }
-
-        for scr_id in fallback_scr_ids[list_type]:
-            try:
-                api_url = (
-                    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-                    f"?formatted=false&lang=en-US&region=US&count={max_tickers}&scrIds={scr_id}"
-                )
-                resp = requests.get(api_url, headers=headers, timeout=20)
-                resp.raise_for_status()
-                data = resp.json()
-                quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-                tickers = [clean_symbol(q.get("symbol")) for q in quotes]
-                tickers = [t for t in tickers if t]
-
+                tickers = dedupe(table[symbol_col].tolist())
                 if tickers:
-                    break
-            except Exception:
-                continue
+                    return tickers
+    except Exception:
+        pass
 
-    # Deduplicate while preserving order.
-    unique_tickers = []
-    seen = set()
-    for ticker in tickers:
-        if ticker not in seen:
-            seen.add(ticker)
-            unique_tickers.append(ticker)
-
-    return unique_tickers[:max_tickers]
+    return []
 
 
 @st.cache_data(ttl=60 * 60 * 24)
