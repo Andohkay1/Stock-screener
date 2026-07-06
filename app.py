@@ -18,7 +18,7 @@ st.set_page_config(
 
 st.title("Akab Stock Screener")
 st.markdown(
-    "Manual ticker checker plus automatic undervalued finder using Yahoo Finance 52-week lows."
+    "Manual ticker checker plus automatic undervalued finder using Yahoo Finance 52 Week Stock Losers."
 )
 
 # ======= INDUSTRY PRODUCTS MAPPING =======
@@ -50,7 +50,7 @@ def clean_symbol(symbol):
 @st.cache_data(ttl=60 * 30)
 def get_yahoo_52_week_lows(max_tickers=100):
     """
-    Pull tickers from Yahoo Finance 52-week lows only.
+    Pull tickers from Yahoo Finance 52 Week Stock Losers only.
 
     This function uses several methods because Yahoo Finance changes its pages
     often and sometimes blocks simple HTML table reads.
@@ -60,7 +60,7 @@ def get_yahoo_52_week_lows(max_tickers=100):
     2. Yahoo market-list page embedded JSON symbols
     3. Yahoo market-list page HTML tables
     """
-    list_type = "52-week-lows"
+    list_type = "52-week-losers"
 
     headers = {
         "User-Agent": (
@@ -73,12 +73,12 @@ def get_yahoo_52_week_lows(max_tickers=100):
     }
 
     yahoo_urls = {
-        "52-week-lows": "https://finance.yahoo.com/markets/stocks/52-week-lows/",
+        "52-week-losers": "https://finance.yahoo.com/markets/stocks/52-week-losers/",
     }
 
     # These names have changed over time, so keep several low-list candidates.
     fallback_scr_ids = {
-        "52-week-lows": [
+        "52-week-losers": [
             "fifty_two_wk_losers",
             "fifty_two_wk_lows",
             "52_week_lows",
@@ -97,8 +97,39 @@ def get_yahoo_52_week_lows(max_tickers=100):
                 unique.append(symbol)
         return unique[:max_tickers]
 
+    def get_52w_change_percent(quote):
+        """Return Yahoo's 52-week change percent when available, so biggest losers come first."""
+        for key in [
+            "fiftyTwoWeekChangePercent",
+            "52WeekChangePercent",
+            "fiftyTwoWeekChange",
+            "52 Week Change %",
+            "52 Wk Change %",
+        ]:
+            value = quote.get(key) if isinstance(quote, dict) else None
+            if isinstance(value, dict):
+                value = value.get("raw", value.get("fmt"))
+            if value is not None:
+                try:
+                    return float(str(value).replace("%", "").replace(",", ""))
+                except Exception:
+                    continue
+        return None
+
     def symbols_from_quotes(quotes):
-        return dedupe([q.get("symbol") for q in quotes if isinstance(q, dict)])
+        clean_quotes = [q for q in quotes if isinstance(q, dict) and q.get("symbol")]
+
+        # Yahoo's page is normally already ordered by the biggest negative 52 Wk Change %.
+        # This sort keeps Akab aligned with that purpose whenever the API supplies the field.
+        if any(get_52w_change_percent(q) is not None for q in clean_quotes):
+            clean_quotes = sorted(
+                clean_quotes,
+                key=lambda q: get_52w_change_percent(q)
+                if get_52w_change_percent(q) is not None
+                else 999999,
+            )
+
+        return dedupe([q.get("symbol") for q in clean_quotes])
 
     # Method 1: Yahoo Finance predefined screener API.
     # Try query2 first, then query1. Some networks prefer one over the other.
@@ -341,7 +372,7 @@ def fetch_news(symbol):
 
 
 def display_screen_results(results, source_label="Manual Screener", passed_only_default=False):
-    """Shared display for manual mode and automatic Yahoo 52-week-low mode.
+    """Shared display for manual mode and automatic Yahoo 52-week-loser mode.
 
     passed_only_default=True is used for the automatic undervalued finder:
     show passed stocks first and keep watchlist/full scan hidden in expanders.
@@ -382,7 +413,7 @@ def display_screen_results(results, source_label="Manual Screener", passed_only_
     watchlist = df_sorted[df_sorted["Passed Count"].between(5, 6)]
 
     st.markdown("### Strong Akab Candidates")
-    st.caption("Default view: stocks from Yahoo 52-week lows that passed all 7 Akab criteria.")
+    st.caption("Default view: top Yahoo 52-week losers that passed all 7 Akab criteria.")
     if strong_candidates.empty:
         st.info("No stocks passed all 7 Akab criteria in this scan.")
     else:
@@ -395,7 +426,7 @@ def display_screen_results(results, source_label="Manual Screener", passed_only_
             else:
                 st.dataframe(watchlist[existing_cols], use_container_width=True)
 
-        with st.expander("Full 52-week-low scan details", expanded=False):
+        with st.expander("Full 52-week-loser scan details", expanded=False):
             st.caption("These are all scanned stocks. They are hidden by default because Akab should surface passed candidates first.")
             st.dataframe(df_sorted[existing_cols], use_container_width=True)
     else:
@@ -523,7 +554,7 @@ def collect_akab_results(tickers):
 
 @st.cache_data(ttl=60 * 60)
 def cached_auto_52_week_low_results(max_tickers):
-    """Pull Yahoo 52-week lows and run Akab automatically. Cached for one hour."""
+    """Pull Yahoo 52 Week Stock Losers and run Akab automatically. Cached for one hour."""
     yahoo_tickers = get_yahoo_52_week_lows(max_tickers=max_tickers)
     if not yahoo_tickers:
         return [], []
@@ -585,13 +616,13 @@ with tab1:
 with tab2:
     st.subheader("Automatic Akab Undervalued Finder")
     st.caption(
-        "Source: Yahoo Finance 52-week lows only. Akab checks fallen stocks for financial strength and value."
+        "Source: Yahoo Finance 52 Week Stock Losers only. Akab checks the biggest 52-week percentage losers for financial strength and value."
     )
 
-    st.markdown("**Yahoo Finance source:** 52-Week Lows only")
+    st.markdown("**Yahoo Finance source:** 52 Week Stock Losers only")
 
     max_tickers = st.number_input(
-        "Maximum Yahoo 52-week-low tickers to check automatically",
+        "Number of top Yahoo 52-week losers to check automatically",
         min_value=10,
         max_value=250,
         value=100,
@@ -603,11 +634,11 @@ with tab2:
         "The watchlist and full scan are still available, but hidden in expanders."
     )
 
-    if st.button("🔄 Refresh Yahoo 52-Week Low Scan", key="refresh_auto"):
+    if st.button("🔄 Refresh Yahoo 52-Week Losers Scan", key="refresh_auto"):
         cached_auto_52_week_low_results.clear()
         st.rerun()
 
-    with st.spinner("Automatically checking Yahoo Finance 52-week lows..."):
+    with st.spinner("Automatically checking top Yahoo Finance 52-week losers..."):
         yahoo_tickers, auto_results = cached_auto_52_week_low_results(max_tickers)
 
     if not yahoo_tickers:
@@ -618,9 +649,9 @@ with tab2:
     elif not auto_results:
         st.warning("Yahoo tickers were found, but no valid Akab financial data was returned.")
     else:
-        st.write(f"Automatically checked {len(auto_results)} stocks from Yahoo Finance 52-week lows.")
+        st.write(f"Automatically checked the top {len(auto_results)} stocks from Yahoo Finance 52 Week Stock Losers.")
         display_screen_results(
             auto_results,
-            source_label="Yahoo Finance 52-Week Lows",
+            source_label="Yahoo Finance 52 Week Stock Losers",
             passed_only_default=True,
         )
